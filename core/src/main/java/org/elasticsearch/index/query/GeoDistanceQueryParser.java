@@ -174,7 +174,7 @@ public class GeoDistanceQueryParser implements QueryParser {
 
         IndexGeoPointFieldData indexFieldData = parseContext.getForField(fieldType);
         final Query query;
-        if (indexCreatedBeforeV2_0) {
+        if (parseContext.indexVersionCreated().before(Version.V_2_1_0)) {
             query = new GeoDistanceRangeQuery(point, null, distance, true, false, geoDistance,
                     ((GeoPointFieldMapperLegacy.GeoPointFieldType) fieldType), indexFieldData, optimizeBbox);
         } else {

@@ -177,7 +177,7 @@ public class GeoPolygonQueryParser implements QueryParser {
         IndexGeoPointFieldData indexFieldData = parseContext.getForField(fieldType);
         final String field = indexFieldData.getFieldNames().indexName();
 
-        Query query = (indexCreatedBeforeV2_0) ? new GeoPolygonQuery(indexFieldData, shell.toArray(new GeoPoint[shell.size()]))
+        Query query = (parseContext.indexVersionCreated().before(Version.V_2_1_0)) ? new GeoPolygonQuery(indexFieldData, shell.toArray(new GeoPoint[shell.size()]))
                 :  new XGeoPointInPolygonQuery(field, lons, lats);
 
         if (queryName != null) {

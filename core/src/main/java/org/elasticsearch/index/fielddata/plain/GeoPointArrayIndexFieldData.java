@@ -81,10 +81,10 @@ public class GeoPointArrayIndexFieldData extends AbstractIndexGeoPointFieldData 
             estimator.afterLoad(null, data.ramBytesUsed());
             return data;
         }
-        return (indexCreatedBefore2x) ? loadLegacy(reader, estimator, terms, data) : load2_0DV(reader, estimator, terms, data);
+        return (indexCreatedBefore2x) ? loadLegacy(reader, estimator, terms, data) : load2_1DV(reader, estimator, terms, data);
     }
 
-    private AtomicGeoPointFieldData load2_0DV(LeafReader reader, NonEstimatingEstimator estimator, Terms terms,
+    private AtomicGeoPointFieldData load2_1DV(LeafReader reader, NonEstimatingEstimator estimator, Terms terms,
                                               AtomicGeoPointFieldData data) throws Exception {
         LongArray indexedPoints = BigArrays.NON_RECYCLING_INSTANCE.newLongArray(128);
         final float acceptableTransientOverheadRatio = fieldDataType.getSettings().getAsFloat("acceptable_transient_overhead_ratio",

@@ -51,7 +51,7 @@ public abstract class AbstractGeoPointDVIndexFieldData extends DocValuesIndexFie
     }
 
     /**
-     * 2.0 Lucene GeoPointFieldType
+     * 2.1 Lucene GeoPointFieldType
      */
     public static class GeoPointDVIndexFieldData extends AbstractGeoPointDVIndexFieldData {
         final boolean indexCreatedBefore2x;

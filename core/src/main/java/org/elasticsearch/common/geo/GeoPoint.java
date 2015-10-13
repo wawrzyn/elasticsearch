@@ -19,9 +19,6 @@
 
 package org.elasticsearch.common.geo;
 
-
-import org.apache.lucene.document.XGeoPointField;
-import org.apache.lucene.index.IndexableField;
 import org.apache.lucene.util.BitUtil;
 import org.apache.lucene.util.XGeoHashUtils;
 import org.apache.lucene.util.XGeoUtils;
@@ -74,7 +71,7 @@ public final class GeoPoint {
             lat = Double.parseDouble(value.substring(0, comma).trim());
             lon = Double.parseDouble(value.substring(comma + 1).trim());
         } else {
-            this.resetFromGeoHash(value);
+            resetFromGeoHash(value);
         }
         return this;
     }

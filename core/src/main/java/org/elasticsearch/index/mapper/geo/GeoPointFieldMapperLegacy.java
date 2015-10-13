@@ -146,7 +146,7 @@ public class GeoPointFieldMapperLegacy extends BaseGeoPointFieldMapper implement
     }
 
     public static Builder parse(Builder builder, Map<String, Object> node, Mapper.TypeParser.ParserContext parserContext) throws MapperParsingException {
-        final boolean indexCreatedBeforeV2_0 = parserContext.indexVersionCreated().before(Version.V_2_1_0);
+        final boolean indexCreatedBeforeV2_0 = parserContext.indexVersionCreated().before(Version.V_2_0_0);
         for (Iterator<Map.Entry<String, Object>> iterator = node.entrySet().iterator(); iterator.hasNext();) {
             Map.Entry<String, Object> entry = iterator.next();
             String propName = Strings.toUnderscoreCase(entry.getKey());

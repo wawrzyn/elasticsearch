@@ -198,7 +198,7 @@ public class GeoBoundingBoxQueryParser implements QueryParser {
         }
 
         Query query;
-        if (!indexCreatedBeforeV2_0) {
+        if (!parseContext.indexVersionCreated().before(Version.V_2_1_0)) {
            query = new XGeoPointInBBoxQuery(fieldType.names().fullName(), topLeft.lon(), bottomRight.lat(), bottomRight.lon(), topLeft.lat());
         } else if ("indexed".equals(type)) {
             query = IndexedGeoBoundingBoxQuery.create(topLeft, bottomRight, (GeoPointFieldMapperLegacy.GeoPointFieldType) fieldType);

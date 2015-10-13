@@ -199,7 +199,7 @@ public abstract class BaseGeoPointFieldMapper extends FieldMapper implements Arr
                 } else if (propName.equals("precision_step")) {
                     builder.precisionStep(XContentMapValues.nodeIntegerValue(propNode));
                     iterator.remove();
-                } else if (propName.equals("path") && parserContext.indexVersionCreated().before(Version.V_2_1_0)) {
+                } else if (propName.equals("path") && parserContext.indexVersionCreated().before(Version.V_2_0_0_beta1)) {
                     builder.multiFieldPathType(parsePathType(name, propNode.toString()));
                     iterator.remove();
                 } else if (propName.equals("geohash")) {

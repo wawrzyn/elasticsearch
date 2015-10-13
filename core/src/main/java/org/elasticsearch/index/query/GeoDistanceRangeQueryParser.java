@@ -223,8 +223,8 @@ public class GeoDistanceRangeQueryParser implements QueryParser {
             to = new Double(GeoUtils.EARTH_SEMI_MINOR_AXIS);
         }
 
-        Query query = (indexCreatedBeforeV2_0) ? new GeoDistanceRangeQuery(point, from, to, includeLower, includeUpper, geoDistance,
-                (GeoPointFieldMapperLegacy.GeoPointFieldType)fieldType, indexFieldData, optimizeBbox) :
+        Query query = (parseContext.indexVersionCreated().before(Version.V_2_1_0)) ? new GeoDistanceRangeQuery(point, from, to,
+                includeLower, includeUpper, geoDistance, (GeoPointFieldMapperLegacy.GeoPointFieldType)fieldType, indexFieldData, optimizeBbox) :
                 new XGeoPointDistanceRangeQuery(indexFieldData.getFieldNames().indexName(), point.lon(), point.lat(),
                         (includeLower) ? from : from+1, (includeUpper) ? to : to-1 );
 
