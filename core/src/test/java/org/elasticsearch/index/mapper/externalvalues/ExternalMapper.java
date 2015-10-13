@@ -101,7 +101,7 @@ public class ExternalMapper extends FieldMapper {
             context.path().add(name);
             BinaryFieldMapper binMapper = binBuilder.build(context);
             BooleanFieldMapper boolMapper = boolBuilder.build(context);
-            Mapper pointMapper = (context.indexCreatedVersion().onOrAfter(Version.V_2_0_0_beta1)) ? pointBuilder.build(context) :
+            Mapper pointMapper = (context.indexCreatedVersion().onOrAfter(Version.V_2_1_0)) ? pointBuilder.build(context) :
                     legacyPointBuilder.build(context);
             GeoShapeFieldMapper shapeMapper = shapeBuilder.build(context);
             FieldMapper stringMapper = (FieldMapper)stringBuilder.build(context);

@@ -56,7 +56,7 @@ public class GeoPointArrayIndexFieldData extends AbstractIndexGeoPointFieldData 
         public IndexFieldData<?> build(Index index, @IndexSettings Settings indexSettings, MappedFieldType fieldType, IndexFieldDataCache cache,
                                        CircuitBreakerService breakerService, MapperService mapperService) {
             return new GeoPointArrayIndexFieldData(index, indexSettings, fieldType.names(), fieldType.fieldDataType(), cache,
-                    breakerService, Version.indexCreated(indexSettings).before(Version.V_2_0_0));
+                    breakerService, Version.indexCreated(indexSettings).before(Version.V_2_1_0));
         }
     }
 

@@ -83,7 +83,7 @@ public abstract class AbstractGeoPointDVIndexFieldData extends DocValuesIndexFie
                                        CircuitBreakerService breakerService, MapperService mapperService) {
             // Ignore breaker
             return new GeoPointDVIndexFieldData(index, fieldType.names(), fieldType.fieldDataType(),
-                    Version.indexCreated(indexSettings).before(Version.V_2_0_0));
+                    Version.indexCreated(indexSettings).before(Version.V_2_1_0));
         }
     }
 }

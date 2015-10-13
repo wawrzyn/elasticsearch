@@ -24,30 +24,19 @@ import org.apache.lucene.document.FieldType;
 import org.apache.lucene.document.XGeoPointField;
 import org.apache.lucene.index.DocValuesType;
 import org.apache.lucene.index.IndexOptions;
-import org.elasticsearch.common.Strings;
-import org.apache.lucene.util.BytesRef;
-import org.apache.lucene.util.NumericUtils;
-import org.apache.lucene.util.XGeoHashUtils;
-import org.elasticsearch.Version;
 import org.elasticsearch.common.Explicit;
-import org.elasticsearch.common.Strings;
-import org.elasticsearch.common.geo.GeoDistance;
 import org.elasticsearch.common.geo.GeoPoint;
 import org.elasticsearch.common.geo.GeoUtils;
 import org.elasticsearch.common.settings.Settings;
-import org.elasticsearch.common.xcontent.support.XContentMapValues;
 import org.elasticsearch.index.mapper.ContentPath;
 import org.elasticsearch.index.mapper.MappedFieldType;
 import org.elasticsearch.index.mapper.Mapper;
 import org.elasticsearch.index.mapper.MapperParsingException;
-import org.elasticsearch.index.mapper.MergeMappingException;
-import org.elasticsearch.index.mapper.MergeResult;
 import org.elasticsearch.index.mapper.ParseContext;
 import org.elasticsearch.index.mapper.core.DoubleFieldMapper;
 import org.elasticsearch.index.mapper.core.StringFieldMapper;
 
 import java.io.IOException;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 
@@ -124,15 +113,6 @@ public class GeoPointFieldMapper extends BaseGeoPointFieldMapper  {
         public GeoPointFieldMapper build(BuilderContext context) {
             return super.build(context);
         }
-    }
-
-    protected static Builder parse(Builder builder, Map<String, Object> node) throws MapperParsingException {
-//        for (Iterator<Map.Entry<String, Object>> iterator = node.entrySet().iterator(); iterator.hasNext();) {
-//            Map.Entry<String, Object> entry = iterator.next();
-//            String fieldName = Strings.toUnderscoreCase(entry.getKey());
-//            Object fieldNode = entry.getValue();
-//        }
-        return builder;
     }
 
     public static class TypeParser extends BaseGeoPointFieldMapper.TypeParser {
