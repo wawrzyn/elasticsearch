@@ -284,6 +284,10 @@ public abstract class Engine implements Closeable {
      * @see Searcher#close()
      */
     public final Searcher acquireSearcher(String source) throws EngineException {
+        return acquireSearcher(source, true);
+    }
+
+    protected final Searcher acquireSearcher(String source, boolean maybeWrap) throws EngineException {
         boolean success = false;
          /* Acquire order here is store -> manager since we need
           * to make sure that the store is not closed before
@@ -296,8 +300,9 @@ public abstract class Engine implements Closeable {
             final IndexSearcher searcher = manager.acquire();
             try {
                 final Searcher retVal = newSearcher(source, searcher, manager);
+                final Searcher wrappedSearcher = maybeWrap ? config().getWrappingService().wrap(engineConfig, retVal) : retVal;
                 success = true;
-                return config().getWrappingService().wrap(engineConfig, retVal);
+                return wrappedSearcher;
             } finally {
                 if (!success) {
                     manager.release(searcher);
@@ -356,7 +361,7 @@ public abstract class Engine implements Closeable {
      */
     public final SegmentsStats segmentsStats() {
         ensureOpen();
-        try (final Searcher searcher = acquireSearcher("segments_stats")) {
+        try (final Searcher searcher = acquireSearcher("segments_stats", false)) {
             SegmentsStats stats = new SegmentsStats();
             for (LeafReaderContext reader : searcher.reader().leaves()) {
                 final SegmentReader segmentReader = segmentReader(reader.reader());
@@ -379,12 +384,15 @@ public abstract class Engine implements Closeable {
         stats.addIndexWriterMaxMemoryInBytes(0);
     }
 
+    /** How much heap Lucene's IndexWriter is using */
+    abstract public long indexWriterRAMBytesUsed();
+
     protected Segment[] getSegmentInfo(SegmentInfos lastCommittedSegmentInfos, boolean verbose) {
         ensureOpen();
         Map<String, Segment> segments = new HashMap<>();
 
         // first, go over and compute the search ones...
-        Searcher searcher = acquireSearcher("segments");
+        Searcher searcher = acquireSearcher("segments", false);
         try {
             for (LeafReaderContext reader : searcher.reader().leaves()) {
                 SegmentCommitInfo info = segmentReader(reader.reader()).getSegmentInfo();
@@ -636,6 +644,8 @@ public abstract class Engine implements Closeable {
         Type opType();
 
         Origin origin();
+
+        long startTime();
     }
 
     public static abstract class IndexingOperation implements Operation {
@@ -738,6 +748,7 @@ public abstract class Engine implements Closeable {
         /**
          * Returns operation start time in nanoseconds.
          */
+        @Override
         public long startTime() {
             return this.startTime;
         }
@@ -896,6 +907,7 @@ public abstract class Engine implements Closeable {
         /**
          * Returns operation start time in nanoseconds.
          */
+        @Override
         public long startTime() {
             return this.startTime;
         }

@@ -505,7 +505,7 @@
                 <plugin>
                     <groupId>org.apache.maven.plugins</groupId>
                     <artifactId>maven-assembly-plugin</artifactId>
-                    <version>2.5.5</version>
+                    <version>2.6</version>
                 </plugin>
                 <plugin>
                     <groupId>org.apache.maven.plugins</groupId>
@@ -989,8 +989,7 @@
                             <headerDefinition>${elasticsearch.license.headerDefinition}</headerDefinition>
                         </headerDefinitions>
                         <includes>
-                            <include>src/main/java/org/elasticsearch/**/*.java</include>
-                            <include>src/test/java/org/elasticsearch/**/*.java</include>
+                            <include>src/**/*.java</include>
                         </includes>
                     </configuration>
                     <executions>
