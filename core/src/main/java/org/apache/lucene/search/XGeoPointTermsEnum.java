@@ -17,15 +17,17 @@ package org.apache.lucene.search;
  * limitations under the License.
  */
 
-import org.apache.lucene.document.XGeoPointField;
-import org.apache.lucene.index.FilteredTermsEnum;
-import org.apache.lucene.index.TermsEnum;
-import org.apache.lucene.util.BytesRef;
-import org.apache.lucene.util.XGeoUtils;
-
 import java.util.Collections;
 import java.util.LinkedList;
 import java.util.List;
+
+import org.apache.lucene.document.GeoPointField;
+import org.apache.lucene.index.FilteredTermsEnum;
+import org.apache.lucene.index.TermsEnum;
+import org.apache.lucene.util.BytesRef;
+import org.apache.lucene.util.BytesRefBuilder;
+import org.apache.lucene.util.NumericUtils;
+import org.apache.lucene.util.XGeoUtils;
 
 /**
  * computes all ranges along a space-filling curve that represents
@@ -40,19 +42,18 @@ abstract class XGeoPointTermsEnum extends FilteredTermsEnum {
   protected final double maxLat;
 
   protected Range currentRange;
-  private BytesRef currentCell;
-  private BytesRef nextSubRange;
+  private final BytesRefBuilder currentCell = new BytesRefBuilder();
+  private final BytesRefBuilder nextSubRange = new BytesRefBuilder();
 
   private final List<Range> rangeBounds = new LinkedList<>();
 
   // detail level should be a factor of PRECISION_STEP limiting the depth of recursion (and number of ranges)
-  // in this case a factor of 4 brings the detail level to ~0.002/0.001 degrees lon/lat respectively (or ~222m/111m)
-  private static final short MAX_SHIFT = XGeoPointField.PRECISION_STEP * 4;
-  protected static final short DETAIL_LEVEL = ((XGeoUtils.BITS<<1)-MAX_SHIFT)/2;
+  protected final short DETAIL_LEVEL;
 
   XGeoPointTermsEnum(final TermsEnum tenum, final double minLon, final double minLat,
-                     final double maxLon, final double maxLat) {
+                    final double maxLon, final double maxLat) {
     super(tenum);
+    DETAIL_LEVEL = (short)(((XGeoUtils.BITS<<1)-computeMaxShift())/2);
     final long rectMinHash = XGeoUtils.mortonHash(minLon, minLat);
     final long rectMaxHash = XGeoUtils.mortonHash(maxLon, maxLat);
     this.minLon = XGeoUtils.mortonUnhashLon(rectMinHash);
@@ -99,12 +100,23 @@ abstract class XGeoPointTermsEnum extends FilteredTermsEnum {
     final short level = (short)((XGeoUtils.BITS<<1)-res>>>1);
 
     // if cell is within and a factor of the precision step, or it crosses the edge of the shape add the range
-    final boolean within = res % XGeoPointField.PRECISION_STEP == 0 && cellWithin(minLon, minLat, maxLon, maxLat);
+    final boolean within = res % GeoPointField.PRECISION_STEP == 0 && cellWithin(minLon, minLat, maxLon, maxLat);
     if (within || (level == DETAIL_LEVEL && cellIntersectsShape(minLon, minLat, maxLon, maxLat))) {
-      rangeBounds.add(new Range(start, res, !within));
+      final short nextRes = (short)(res-1);
+      if (nextRes % GeoPointField.PRECISION_STEP == 0) {
+        rangeBounds.add(new Range(start, nextRes, !within));
+        rangeBounds.add(new Range(start|(1L<<nextRes), nextRes, !within));
+      } else {
+        rangeBounds.add(new Range(start, res, !within));
+      }
     } else if (level < DETAIL_LEVEL && cellIntersectsMBR(minLon, minLat, maxLon, maxLat)) {
       computeRange(start, (short) (res - 1));
     }
+  }
+
+  protected short computeMaxShift() {
+    // in this case a factor of 4 brings the detail level to ~0.002/0.001 degrees lon/lat respectively (or ~222m/111m)
+    return GeoPointField.PRECISION_STEP * 4;
   }
 
   /**
@@ -145,7 +157,7 @@ abstract class XGeoPointTermsEnum extends FilteredTermsEnum {
 
   private void nextRange() {
     currentRange = rangeBounds.remove(0);
-    currentCell = currentRange.asBytesRef(currentCell);
+    currentRange.fillBytesRef(currentCell);
   }
 
   @Override
@@ -156,19 +168,19 @@ abstract class XGeoPointTermsEnum extends FilteredTermsEnum {
       }
 
       // if the new upper bound is before the term parameter, the sub-range is never a hit
-      if (term != null && term.compareTo(currentCell) > 0) {
+      if (term != null && term.compareTo(currentCell.get()) > 0) {
         nextRange();
         if (!rangeBounds.isEmpty()) {
           continue;
         }
       }
       // never seek backwards, so use current term if lower bound is smaller
-      return (term != null && term.compareTo(currentCell) > 0) ? term : currentCell;
+      return (term != null && term.compareTo(currentCell.get()) > 0) ?
+              term : currentCell.get();
     }
 
     // no more sub-range enums available
     assert rangeBounds.isEmpty();
-    currentCell = null;
     return null;
   }
 
@@ -183,12 +195,13 @@ abstract class XGeoPointTermsEnum extends FilteredTermsEnum {
   @Override
   protected AcceptStatus accept(BytesRef term) {
     // validate value is in range
-    while (currentCell == null || term.compareTo(currentCell) > 0) {
+    while (currentCell == null || term.compareTo(currentCell.get()) > 0) {
       if (rangeBounds.isEmpty()) {
         return AcceptStatus.END;
       }
       // peek next sub-range, only seek if the current term is smaller than next lower bound
-      if (term.compareTo(this.nextSubRange = rangeBounds.get(0).asBytesRef(this.nextSubRange)) < 0) {
+      rangeBounds.get(0).fillBytesRef(this.nextSubRange);
+      if (term.compareTo(this.nextSubRange.get()) < 0) {
         return AcceptStatus.NO_AND_SEEK;
       }
       // step forward to next range without seeking, as next range is less or equal current term
@@ -215,38 +228,21 @@ abstract class XGeoPointTermsEnum extends FilteredTermsEnum {
     }
 
     /**
-     * Encode as a BytesRef using a reusable object. This allows us to lazily create the bytesRef (which is
+     * Encode as a BytesRef using a reusable object. This allows us to lazily create the BytesRef (which is
      * quite expensive), only when we need it.
      */
-    private BytesRef asBytesRef(BytesRef reusable) {
-      if (reusable == null) {
-        reusable = new BytesRef(11);
-      }
-      reusable.length = 0;
-
-      final int s = (int)this.shift;
-      // ensure shift is 0..63
-      if ((s & ~0x3f) != 0) {
-        throw new IllegalArgumentException("Illegal shift value, must be 0..63; got shift=" + s);
-      }
-      int nChars = (((63-s)*37)>>8) + 1;    // i/7 is the same as (i*37)>>8 for i in 0..63
-      reusable.length = nChars+1;   // one extra for the byte that contains the shift info
-      reusable.bytes[0] = (byte)((byte)(0x20) + s);
-      long sortableBits = start ^ 0x8000000000000000L;
-      sortableBits >>>= s;
-      while (nChars > 0) {
-        // Store 7 bits per byte for compatibility
-        // with UTF-8 encoding of terms
-        reusable.bytes[nChars--] = (byte)(sortableBits & 0x7f);
-        sortableBits >>>= 7;
-      }
-      return reusable;
+    private void fillBytesRef(BytesRefBuilder result) {
+      assert result != null;
+      NumericUtils.longToPrefixCoded(start, shift, result);
     }
 
     @Override
     public int compareTo(Range other) {
       final int result = Short.compare(this.shift, other.shift);
-      return (result == 0) ? Long.compare(this.start, other.start) : result;
+      if (result == 0) {
+        return Long.compare(this.start, other.start);
+      }
+      return result;
     }
   }
 }

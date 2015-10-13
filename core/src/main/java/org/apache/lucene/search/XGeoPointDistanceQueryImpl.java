@@ -1,31 +1,30 @@
-/*
- * Licensed to Elasticsearch under one or more contributor
- * license agreements. See the NOTICE file distributed with
- * this work for additional information regarding copyright
- * ownership. Elasticsearch licenses this file to you under
- * the Apache License, Version 2.0 (the "License"); you may
- * not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *    http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing,
- * software distributed under the License is distributed on an
- * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
- * KIND, either express or implied.  See the License for the
- * specific language governing permissions and limitations
- * under the License.
- */
-
 package org.apache.lucene.search;
 
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.
+ * The ASF licenses this file to You under the Apache License, Version 2.0
+ * (the "License"); you may not use this file except in compliance with
+ * the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+import java.io.IOException;
+
+import org.apache.lucene.document.GeoPointField;
 import org.apache.lucene.index.Terms;
 import org.apache.lucene.index.TermsEnum;
 import org.apache.lucene.util.AttributeSource;
 import org.apache.lucene.util.XGeoUtils;
 import org.apache.lucene.util.SloppyMath;
-
-import java.io.IOException;
 
 /** Package private implementation for the public facing GeoPointDistanceQuery delegate class.
  *
@@ -34,7 +33,7 @@ import java.io.IOException;
 final class XGeoPointDistanceQueryImpl extends XGeoPointInBBoxQueryImpl {
   private final XGeoPointDistanceQuery query;
 
-  XGeoPointDistanceQueryImpl(final String field, final XGeoPointDistanceQuery q, final XGeoBoundingBox bbox) {
+  XGeoPointDistanceQueryImpl(final String field, final XGeoPointDistanceQuery q, final GeoBoundingBox bbox) {
     super(field, bbox.minLon, bbox.minLat, bbox.maxLon, bbox.maxLat);
     query = q;
   }
@@ -55,6 +54,23 @@ final class XGeoPointDistanceQueryImpl extends XGeoPointInBBoxQueryImpl {
       super(tenum, minLon, minLat, maxLon, maxLat);
     }
 
+    /**
+     * Computes the maximum shift for the given pointDistanceQuery. This prevents unnecessary depth traversal
+     * given the size of the distance query.
+     */
+    @Override
+    protected short computeMaxShift() {
+      final short shiftFactor;
+
+      if (query.radius > 1000000) {
+        shiftFactor = 5;
+      } else {
+        shiftFactor = 4;
+      }
+
+      return (short)(GeoPointField.PRECISION_STEP * shiftFactor);
+    }
+
     @Override
     protected boolean cellCrosses(final double minLon, final double minLat, final double maxLon, final double maxLat) {
       return XGeoUtils.rectCrossesCircle(minLon, minLat, maxLon, maxLat, query.centerLon, query.centerLat, query.radius);
@@ -72,13 +88,10 @@ final class XGeoPointDistanceQueryImpl extends XGeoPointInBBoxQueryImpl {
     }
 
     /**
-     * The two-phase query approach. The parent
-     * {@link XGeoPointTermsEnum.DefaultGeoPointQueryPostFilter} class match
-     * encoded terms that fall within the bounding box of the polygon. Those documents that pass the initial
-     * bounding box filter are then compared to the provided distance using the
+     * The two-phase query approach. The parent {@link org.apache.lucene.search.GeoPointTermsEnum} class matches
+     * encoded terms that fall within the minimum bounding box of the point-radius circle. Those documents that pass
+     * the initial bounding box filter are then post filter compared to the provided distance using the
      * {@link org.apache.lucene.util.SloppyMath#haversin} method.
-     *
-     * @return match status
      */
     @Override
     protected boolean postFilter(final double lon, final double lat) {

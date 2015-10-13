@@ -266,7 +266,7 @@ public final class XGeoUtils {
     final int sidesLen = sides-1;
     for (int i=0; i<sidesLen; ++i) {
       angle = (i*360/sides);
-      pt = XGeoProjectionUtils.pointFromLonLatBearing(lon, lat, angle, radius, pt);
+      pt = GeoProjectionUtils.pointFromLonLatBearing(lon, lat, angle, radius, pt);
       lons[i] = pt[0];
       lats[i] = pt[1];
     }
@@ -344,9 +344,9 @@ public final class XGeoUtils {
                                            double lat2, double alt2, double centerLon, double centerLat,
                                            double centerAlt, double radius) {
     // convert to cartesian 3d (in meters)
-    double[] ecf1 = XGeoProjectionUtils.llaToECF(lon1, lat1, alt1, null);
-    double[] ecf2 = XGeoProjectionUtils.llaToECF(lon2, lat2, alt2, null);
-    double[] cntr = XGeoProjectionUtils.llaToECF(centerLon, centerLat, centerAlt, null);
+    double[] ecf1 = GeoProjectionUtils.llaToECF(lon1, lat1, alt1, null);
+    double[] ecf2 = GeoProjectionUtils.llaToECF(lon2, lat2, alt2, null);
+    double[] cntr = GeoProjectionUtils.llaToECF(centerLon, centerLat, centerAlt, null);
 
     final double dX = ecf2[0] - ecf1[0];
     final double dY = ecf2[1] - ecf1[1];

@@ -20,7 +20,7 @@
 package org.apache.lucene.search;
 
 import org.apache.lucene.index.IndexReader;
-import org.apache.lucene.util.XGeoProjectionUtils;
+import org.apache.lucene.util.GeoProjectionUtils;
 import org.apache.lucene.util.XGeoUtils;
 import org.apache.lucene.util.ToStringUtils;
 
@@ -54,7 +54,7 @@ public class XGeoPointDistanceQuery extends XGeoPointInBBoxQuery {
     this(field, computeBBox(centerLon, centerLat, radius), centerLon, centerLat, radius);
   }
 
-  private XGeoPointDistanceQuery(final String field, XGeoBoundingBox bbox, final double centerLon,
+  private XGeoPointDistanceQuery(final String field, GeoBoundingBox bbox, final double centerLon,
                                  final double centerLat, final double radius) {
     super(field, bbox.minLon, bbox.minLat, bbox.maxLon, bbox.maxLat);
 
@@ -76,26 +76,26 @@ public class XGeoPointDistanceQuery extends XGeoPointInBBoxQuery {
     if (maxLon < minLon) {
       BooleanQuery bqb = new BooleanQuery();
 
-      XGeoPointDistanceQueryImpl left = new XGeoPointDistanceQueryImpl(field, this, new XGeoBoundingBox(-180.0D, maxLon,
+      XGeoPointDistanceQueryImpl left = new XGeoPointDistanceQueryImpl(field, this, new GeoBoundingBox(-180.0D, maxLon,
           minLat, maxLat));
       left.setBoost(getBoost());
       bqb.add(new BooleanClause(left, BooleanClause.Occur.SHOULD));
-      XGeoPointDistanceQueryImpl right = new XGeoPointDistanceQueryImpl(field, this, new XGeoBoundingBox(minLon, 180.0D,
+      XGeoPointDistanceQueryImpl right = new XGeoPointDistanceQueryImpl(field, this, new GeoBoundingBox(minLon, 180.0D,
           minLat, maxLat));
       right.setBoost(getBoost());
       bqb.add(new BooleanClause(right, BooleanClause.Occur.SHOULD));
       return bqb;
     }
-    return new XGeoPointDistanceQueryImpl(field, this, new XGeoBoundingBox(this.minLon, this.maxLon, this.minLat, this.maxLat));
+    return new XGeoPointDistanceQueryImpl(field, this, new GeoBoundingBox(this.minLon, this.maxLon, this.minLat, this.maxLat));
   }
 
-  static XGeoBoundingBox computeBBox(final double centerLon, final double centerLat, final double radius) {
-    double[] t = XGeoProjectionUtils.pointFromLonLatBearing(centerLon, centerLat, 0, radius, null);
-    double[] r = XGeoProjectionUtils.pointFromLonLatBearing(centerLon, centerLat, 90, radius, null);
-    double[] b = XGeoProjectionUtils.pointFromLonLatBearing(centerLon, centerLat, 180, radius, null);
-    double[] l = XGeoProjectionUtils.pointFromLonLatBearing(centerLon, centerLat, 270, radius, null);
+  static GeoBoundingBox computeBBox(final double centerLon, final double centerLat, final double radius) {
+    double[] t = GeoProjectionUtils.pointFromLonLatBearing(centerLon, centerLat, 0, radius, null);
+    double[] r = GeoProjectionUtils.pointFromLonLatBearing(centerLon, centerLat, 90, radius, null);
+    double[] b = GeoProjectionUtils.pointFromLonLatBearing(centerLon, centerLat, 180, radius, null);
+    double[] l = GeoProjectionUtils.pointFromLonLatBearing(centerLon, centerLat, 270, radius, null);
 
-    return new XGeoBoundingBox(XGeoUtils.normalizeLon(l[0]), XGeoUtils.normalizeLon(r[0]), XGeoUtils.normalizeLat(b[1]),
+    return new GeoBoundingBox(XGeoUtils.normalizeLon(l[0]), XGeoUtils.normalizeLon(r[0]), XGeoUtils.normalizeLat(b[1]),
         XGeoUtils.normalizeLat(t[1]));
   }
 

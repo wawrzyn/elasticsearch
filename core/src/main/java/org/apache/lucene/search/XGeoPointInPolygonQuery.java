@@ -62,7 +62,7 @@ public final class XGeoPointInPolygonQuery extends XGeoPointInBBoxQueryImpl {
   }
 
   /** Common constructor, used only internally. */
-  private XGeoPointInPolygonQuery(final String field, XGeoBoundingBox bbox, final double[] polyLons, final double[] polyLats) {
+  private XGeoPointInPolygonQuery(final String field, GeoBoundingBox bbox, final double[] polyLons, final double[] polyLats) {
     super(field, bbox.minLon, bbox.minLat, bbox.maxLon, bbox.maxLat);
     if (polyLats.length != polyLons.length) {
       throw new IllegalArgumentException("polyLats and polyLons must be equal length");
@@ -189,7 +189,7 @@ public final class XGeoPointInPolygonQuery extends XGeoPointInBBoxQueryImpl {
     }
   }
 
-  private static XGeoBoundingBox computeBBox(double[] polyLons, double[] polyLats) {
+  private static GeoBoundingBox computeBBox(double[] polyLons, double[] polyLats) {
     if (polyLons.length != polyLats.length) {
       throw new IllegalArgumentException("polyLons and polyLats must be equal length");
     }
@@ -212,7 +212,7 @@ public final class XGeoPointInPolygonQuery extends XGeoPointInBBoxQueryImpl {
       maxLat = Math.max(polyLats[i], maxLat);
     }
 
-    return new XGeoBoundingBox(minLon, maxLon, minLat, maxLat);
+    return new GeoBoundingBox(minLon, maxLon, minLat, maxLat);
   }
 
   /**
