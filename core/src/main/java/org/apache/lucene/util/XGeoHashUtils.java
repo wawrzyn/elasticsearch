@@ -66,8 +66,6 @@ public class XGeoHashUtils {
     }
 
     /**
-<<<<<<< HEAD
-=======
      * Encode an existing geohash long to the provided precision
      */
     public static long longEncode(long geohash, int level) {
@@ -81,7 +79,6 @@ public class XGeoHashUtils {
     }
 
     /**
->>>>>>> 2.1
      * Encode to a geohash string from the geohash based long format
      */
     public static final String stringEncode(long geoHashLong) {
