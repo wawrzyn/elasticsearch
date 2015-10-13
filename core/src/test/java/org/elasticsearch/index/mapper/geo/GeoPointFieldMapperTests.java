@@ -19,6 +19,7 @@
 package org.elasticsearch.index.mapper.geo;
 
 import org.apache.lucene.document.XGeoPointField;
+import org.apache.lucene.index.IndexableField;
 import org.apache.lucene.util.XGeoHashUtils;
 import org.apache.lucene.util.XGeoUtils;
 import org.elasticsearch.Version;
@@ -145,7 +146,8 @@ public class GeoPointFieldMapperTests extends ESSingleNodeTestCase {
                 .field("point", XGeoHashUtils.stringEncode(1.3, 1.2))
                 .endObject()
                 .bytes());
-        GeoPoint pt = new GeoPoint(doc.rootDoc().getField("point"));
+        XGeoPointField geoPtField = (XGeoPointField)(doc.rootDoc().getField("point"));
+        GeoPoint pt = new GeoPoint(geoPtField.getLat(), geoPtField.getLon());
 
         assertThat(pt, notNullValue());
         assertThat(pt.getLon(), closeTo(1.3, XGeoUtils.TOLERANCE));

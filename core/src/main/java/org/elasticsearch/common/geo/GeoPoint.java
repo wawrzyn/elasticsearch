@@ -52,16 +52,6 @@ public final class GeoPoint {
         this.lon = lon;
     }
 
-    public GeoPoint(IndexableField fieldData) {
-        if (fieldData instanceof XGeoPointField) {
-            this.lat = ((XGeoPointField) (fieldData)).getLat();
-            this.lon = ((XGeoPointField) fieldData).getLon();
-        } else {
-            throw new IllegalArgumentException("found an instance of  " + fieldData.getClass()
-            + " when expecting an instance of " + XGeoPointField.class);
-        }
-    }
-
     public GeoPoint reset(double lat, double lon) {
         this.lat = lat;
         this.lon = lon;
