@@ -17,30 +17,15 @@
  * under the License.
  */
 
-package org.elasticsearch.index.fielddata;
+package org.elasticsearch.search.aggregations.metrics.geocentroid;
 
-import org.apache.lucene.index.DirectoryReader;
-import org.apache.lucene.index.IndexReader;
-
-
-
+import org.elasticsearch.common.geo.GeoPoint;
+import org.elasticsearch.search.aggregations.Aggregation;
 
 /**
- * Soecialization of {@link IndexFieldData} for parent/child mappings.
+ * Interface for {@link org.elasticsearch.search.aggregations.metrics.geocentroid.GeoCentroidAggregator}
  */
-public interface IndexParentChildFieldData extends IndexFieldData.Global<AtomicParentChildFieldData> {
-
-    /**
-     * Load a global view of the ordinals for the given {@link IndexReader},
-     * potentially from a cache.
-     */
-    @Override
-    IndexParentChildFieldData loadGlobal(DirectoryReader indexReader);
-
-    /**
-     * Load a global view of the ordinals for the given {@link IndexReader}.
-     */
-    @Override
-    IndexParentChildFieldData localGlobalDirect(DirectoryReader indexReader) throws Exception;
-
+public interface GeoCentroid extends Aggregation {
+    GeoPoint centroid();
+    long count();
 }
