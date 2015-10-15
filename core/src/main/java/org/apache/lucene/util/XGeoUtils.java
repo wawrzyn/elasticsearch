@@ -25,8 +25,6 @@ import java.util.ArrayList;
  * @lucene.experimental
  */
 public final class XGeoUtils {
-  private static final short MIN_LON = -180;
-  private static final short MIN_LAT = -90;
   public static final short BITS = 31;
   private static final double LON_SCALE = (0x1L<<BITS)/360.0D;
   private static final double LAT_SCALE = (0x1L<<BITS)/180.0D;
@@ -63,19 +61,19 @@ public final class XGeoUtils {
   }
 
   private static long scaleLon(final double val) {
-    return (long) ((val-MIN_LON) * LON_SCALE);
+    return (long) ((val-MIN_LON_INCL) * LON_SCALE);
   }
 
   private static long scaleLat(final double val) {
-    return (long) ((val-MIN_LAT) * LAT_SCALE);
+    return (long) ((val-MIN_LAT_INCL) * LAT_SCALE);
   }
 
   private static double unscaleLon(final long val) {
-    return (val / LON_SCALE) + MIN_LON;
+    return (val / LON_SCALE) + MIN_LON_INCL;
   }
 
   private static double unscaleLat(final long val) {
-    return (val / LAT_SCALE) + MIN_LAT;
+    return (val / LAT_SCALE) + MIN_LAT_INCL;
   }
 
   public static double compare(final double v1, final double v2) {
