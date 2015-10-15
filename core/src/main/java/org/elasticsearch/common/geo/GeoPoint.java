@@ -30,7 +30,8 @@ public final class GeoPoint {
 
     private double lat;
     private double lon;
-    private final static double TOLERANCE = XGeoUtils.TOLERANCE;
+    public  final static double TOLERANCE = XGeoUtils.TOLERANCE;
+
     public GeoPoint() {
     }
 
