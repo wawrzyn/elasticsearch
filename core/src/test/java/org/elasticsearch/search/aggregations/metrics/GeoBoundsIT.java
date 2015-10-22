@@ -19,8 +19,6 @@
 
 package org.elasticsearch.search.aggregations.metrics;
 
-import org.apache.lucene.util.XGeoUtils;
-import org.elasticsearch.action.index.IndexRequestBuilder;
 import org.elasticsearch.action.search.SearchResponse;
 import org.elasticsearch.common.geo.GeoPoint;
 import org.elasticsearch.common.util.BigArray;
@@ -63,10 +61,10 @@ public class GeoBoundsIT extends AbstractGeoTestCase {
         assertThat(geoBounds.getName(), equalTo(aggName));
         GeoPoint topLeft = geoBounds.topLeft();
         GeoPoint bottomRight = geoBounds.bottomRight();
-        assertThat(topLeft.lat(), closeTo(singleTopLeft.lat(), XGeoUtils.TOLERANCE));
-        assertThat(topLeft.lon(), closeTo(singleTopLeft.lon(), XGeoUtils.TOLERANCE));
-        assertThat(bottomRight.lat(), closeTo(singleBottomRight.lat(), XGeoUtils.TOLERANCE));
-        assertThat(bottomRight.lon(), closeTo(singleBottomRight.lon(), XGeoUtils.TOLERANCE));
+        assertThat(topLeft.lat(), closeTo(singleTopLeft.lat(), GEOHASH_TOLERANCE));
+        assertThat(topLeft.lon(), closeTo(singleTopLeft.lon(), GEOHASH_TOLERANCE));
+        assertThat(bottomRight.lat(), closeTo(singleBottomRight.lat(), GEOHASH_TOLERANCE));
+        assertThat(bottomRight.lon(), closeTo(singleBottomRight.lon(), GEOHASH_TOLERANCE));
     }
 
     @Test
@@ -93,14 +91,14 @@ public class GeoBoundsIT extends AbstractGeoTestCase {
         assertThat((GeoBounds) global.getProperty(aggName), sameInstance(geobounds));
         GeoPoint topLeft = geobounds.topLeft();
         GeoPoint bottomRight = geobounds.bottomRight();
-        assertThat(topLeft.lat(), closeTo(singleTopLeft.lat(), GeoPoint.TOLERANCE));
-        assertThat(topLeft.lon(), closeTo(singleTopLeft.lon(), GeoPoint.TOLERANCE));
-        assertThat(bottomRight.lat(), closeTo(singleBottomRight.lat(), GeoPoint.TOLERANCE));
-        assertThat(bottomRight.lon(), closeTo(singleBottomRight.lon(), GeoPoint.TOLERANCE));
-        assertThat((double) global.getProperty(aggName + ".top"), closeTo(singleTopLeft.lat(), GeoPoint.TOLERANCE));
-        assertThat((double) global.getProperty(aggName + ".left"), closeTo(singleTopLeft.lon(), GeoPoint.TOLERANCE));
-        assertThat((double) global.getProperty(aggName + ".bottom"), closeTo(singleBottomRight.lat(), GeoPoint.TOLERANCE));
-        assertThat((double) global.getProperty(aggName + ".right"), closeTo(singleBottomRight.lon(), GeoPoint.TOLERANCE));
+        assertThat(topLeft.lat(), closeTo(singleTopLeft.lat(), GEOHASH_TOLERANCE));
+        assertThat(topLeft.lon(), closeTo(singleTopLeft.lon(), GEOHASH_TOLERANCE));
+        assertThat(bottomRight.lat(), closeTo(singleBottomRight.lat(), GEOHASH_TOLERANCE));
+        assertThat(bottomRight.lon(), closeTo(singleBottomRight.lon(), GEOHASH_TOLERANCE));
+        assertThat((double) global.getProperty(aggName + ".top"), closeTo(singleTopLeft.lat(), GEOHASH_TOLERANCE));
+        assertThat((double) global.getProperty(aggName + ".left"), closeTo(singleTopLeft.lon(), GEOHASH_TOLERANCE));
+        assertThat((double) global.getProperty(aggName + ".bottom"), closeTo(singleBottomRight.lat(), GEOHASH_TOLERANCE));
+        assertThat((double) global.getProperty(aggName + ".right"), closeTo(singleBottomRight.lon(), GEOHASH_TOLERANCE));
     }
 
     @Test
@@ -118,10 +116,10 @@ public class GeoBoundsIT extends AbstractGeoTestCase {
         assertThat(geoBounds.getName(), equalTo(aggName));
         GeoPoint topLeft = geoBounds.topLeft();
         GeoPoint bottomRight = geoBounds.bottomRight();
-        assertThat(topLeft.lat(), closeTo(multiTopLeft.lat(), XGeoUtils.TOLERANCE));
-        assertThat(topLeft.lon(), closeTo(multiTopLeft.lon(), XGeoUtils.TOLERANCE));
-        assertThat(bottomRight.lat(), closeTo(multiBottomRight.lat(), XGeoUtils.TOLERANCE));
-        assertThat(bottomRight.lon(), closeTo(multiBottomRight.lon(), XGeoUtils.TOLERANCE));
+        assertThat(topLeft.lat(), closeTo(multiTopLeft.lat(), GEOHASH_TOLERANCE));
+        assertThat(topLeft.lon(), closeTo(multiTopLeft.lon(), GEOHASH_TOLERANCE));
+        assertThat(bottomRight.lat(), closeTo(multiBottomRight.lat(), GEOHASH_TOLERANCE));
+        assertThat(bottomRight.lon(), closeTo(multiBottomRight.lon(), GEOHASH_TOLERANCE));
     }
 
     @Test
@@ -156,10 +154,10 @@ public class GeoBoundsIT extends AbstractGeoTestCase {
         assertThat(geoBounds.getName(), equalTo(aggName));
         GeoPoint topLeft = geoBounds.topLeft();
         GeoPoint bottomRight = geoBounds.bottomRight();
-        assertThat(topLeft.lat(), closeTo(singleTopLeft.lat(), XGeoUtils.TOLERANCE));
-        assertThat(topLeft.lon(), closeTo(singleTopLeft.lon(), XGeoUtils.TOLERANCE));
-        assertThat(bottomRight.lat(), closeTo(singleBottomRight.lat(), XGeoUtils.TOLERANCE));
-        assertThat(bottomRight.lon(), closeTo(singleBottomRight.lon(), XGeoUtils.TOLERANCE));
+        assertThat(topLeft.lat(), closeTo(singleTopLeft.lat(), GEOHASH_TOLERANCE));
+        assertThat(topLeft.lon(), closeTo(singleTopLeft.lon(), GEOHASH_TOLERANCE));
+        assertThat(bottomRight.lat(), closeTo(singleBottomRight.lat(), GEOHASH_TOLERANCE));
+        assertThat(bottomRight.lon(), closeTo(singleBottomRight.lon(), GEOHASH_TOLERANCE));
     }
 
     @Test
@@ -197,10 +195,10 @@ public class GeoBoundsIT extends AbstractGeoTestCase {
         assertThat(geoBounds.getName(), equalTo(aggName));
         GeoPoint topLeft = geoBounds.topLeft();
         GeoPoint bottomRight = geoBounds.bottomRight();
-        assertThat(topLeft.lat(), closeTo(geoValuesTopLeft.lat(), XGeoUtils.TOLERANCE));
-        assertThat(topLeft.lon(), closeTo(geoValuesTopLeft.lon(), XGeoUtils.TOLERANCE));
-        assertThat(bottomRight.lat(), closeTo(geoValuesBottomRight.lat(), XGeoUtils.TOLERANCE));
-        assertThat(bottomRight.lon(), closeTo(geoValuesBottomRight.lon(), XGeoUtils.TOLERANCE));
+        assertThat(topLeft.lat(), closeTo(geoValuesTopLeft.lat(), GEOHASH_TOLERANCE));
+        assertThat(topLeft.lon(), closeTo(geoValuesTopLeft.lon(), GEOHASH_TOLERANCE));
+        assertThat(bottomRight.lat(), closeTo(geoValuesBottomRight.lat(), GEOHASH_TOLERANCE));
+        assertThat(bottomRight.lon(), closeTo(geoValuesBottomRight.lon(), GEOHASH_TOLERANCE));
     }
 
     @Test
@@ -220,10 +218,10 @@ public class GeoBoundsIT extends AbstractGeoTestCase {
         assertThat(geoBounds.getName(), equalTo(aggName));
         GeoPoint topLeft = geoBounds.topLeft();
         GeoPoint bottomRight = geoBounds.bottomRight();
-        assertThat(topLeft.lat(), closeTo(geoValuesTopLeft.lat(), XGeoUtils.TOLERANCE));
-        assertThat(topLeft.lon(), closeTo(geoValuesTopLeft.lon(), XGeoUtils.TOLERANCE));
-        assertThat(bottomRight.lat(), closeTo(geoValuesBottomRight.lat(), XGeoUtils.TOLERANCE));
-        assertThat(bottomRight.lon(), closeTo(geoValuesBottomRight.lon(), XGeoUtils.TOLERANCE));
+        assertThat(topLeft.lat(), closeTo(geoValuesTopLeft.lat(), GEOHASH_TOLERANCE));
+        assertThat(topLeft.lon(), closeTo(geoValuesTopLeft.lon(), GEOHASH_TOLERANCE));
+        assertThat(bottomRight.lat(), closeTo(geoValuesBottomRight.lat(), GEOHASH_TOLERANCE));
+        assertThat(bottomRight.lon(), closeTo(geoValuesBottomRight.lon(), GEOHASH_TOLERANCE));
     }
 
     /**
@@ -269,9 +267,9 @@ public class GeoBoundsIT extends AbstractGeoTestCase {
         assertThat(geoBounds.getName(), equalTo(aggName));
         GeoPoint topLeft = geoBounds.topLeft();
         GeoPoint bottomRight = geoBounds.bottomRight();
-        assertThat(topLeft.lat(), closeTo(1.0, XGeoUtils.TOLERANCE));
-        assertThat(topLeft.lon(), closeTo(0.0, XGeoUtils.TOLERANCE));
-        assertThat(bottomRight.lat(), closeTo(1.0, XGeoUtils.TOLERANCE));
-        assertThat(bottomRight.lon(), closeTo(0.0, XGeoUtils.TOLERANCE));
+        assertThat(topLeft.lat(), closeTo(1.0, GEOHASH_TOLERANCE));
+        assertThat(topLeft.lon(), closeTo(0.0, GEOHASH_TOLERANCE));
+        assertThat(bottomRight.lat(), closeTo(1.0, GEOHASH_TOLERANCE));
+        assertThat(bottomRight.lon(), closeTo(0.0, GEOHASH_TOLERANCE));
     }
 }

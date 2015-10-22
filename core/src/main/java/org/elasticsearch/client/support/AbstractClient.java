@@ -139,6 +139,10 @@ import org.elasticsearch.action.admin.indices.flush.FlushAction;
 import org.elasticsearch.action.admin.indices.flush.FlushRequest;
 import org.elasticsearch.action.admin.indices.flush.FlushRequestBuilder;
 import org.elasticsearch.action.admin.indices.flush.FlushResponse;
+import org.elasticsearch.action.admin.indices.forcemerge.ForceMergeAction;
+import org.elasticsearch.action.admin.indices.forcemerge.ForceMergeRequest;
+import org.elasticsearch.action.admin.indices.forcemerge.ForceMergeRequestBuilder;
+import org.elasticsearch.action.admin.indices.forcemerge.ForceMergeResponse;
 import org.elasticsearch.action.admin.indices.get.GetIndexAction;
 import org.elasticsearch.action.admin.indices.get.GetIndexRequest;
 import org.elasticsearch.action.admin.indices.get.GetIndexRequestBuilder;
@@ -152,10 +156,6 @@ import org.elasticsearch.action.admin.indices.open.OpenIndexAction;
 import org.elasticsearch.action.admin.indices.open.OpenIndexRequest;
 import org.elasticsearch.action.admin.indices.open.OpenIndexRequestBuilder;
 import org.elasticsearch.action.admin.indices.open.OpenIndexResponse;
-import org.elasticsearch.action.admin.indices.optimize.OptimizeAction;
-import org.elasticsearch.action.admin.indices.optimize.OptimizeRequest;
-import org.elasticsearch.action.admin.indices.optimize.OptimizeRequestBuilder;
-import org.elasticsearch.action.admin.indices.optimize.OptimizeResponse;
 import org.elasticsearch.action.admin.indices.recovery.RecoveryAction;
 import org.elasticsearch.action.admin.indices.recovery.RecoveryRequest;
 import org.elasticsearch.action.admin.indices.recovery.RecoveryRequestBuilder;
@@ -613,12 +613,14 @@ public abstract class AbstractClient extends AbstractComponent implements Client
                 return new CountResponse(listenerResponse);
             }
         };
+        deprecationLogger.deprecated("the count api is deprecated and will be removed from the java api in the next major version");
         execute(SearchAction.INSTANCE, request.toSearchRequest(), actionFuture);
         return actionFuture;
     }
 
     @Override
     public void count(final CountRequest request, final ActionListener<CountResponse> listener) {
+        deprecationLogger.deprecated("the count api is deprecated and will be removed from the java api in the next major version");
         execute(SearchAction.INSTANCE, request.toSearchRequest(), new DelegatingActionListener<SearchResponse, CountResponse>(listener) {
             @Override
             protected CountResponse getDelegatedFromInstigator(SearchResponse response) {
@@ -629,21 +631,25 @@ public abstract class AbstractClient extends AbstractComponent implements Client
 
     @Override
     public CountRequestBuilder prepareCount(String... indices) {
+        deprecationLogger.deprecated("the count api is deprecated and will be removed from the java api in the next major version");
         return new CountRequestBuilder(this, CountAction.INSTANCE).setIndices(indices);
     }
 
     @Override
     public ActionFuture<ExistsResponse> exists(final ExistsRequest request) {
+        deprecationLogger.deprecated("search exists api is deprecated and will be removed in the next major version, use search with size set to 0 and terminate_after set to 1 instead");
         return execute(ExistsAction.INSTANCE, request);
     }
 
     @Override
     public void exists(final ExistsRequest request, final ActionListener<ExistsResponse> listener) {
+        deprecationLogger.deprecated("search exists api is deprecated and will be removed in the next major version, use search with size set to 0 and terminate_after set to 1 instead");
         execute(ExistsAction.INSTANCE, request, listener);
     }
 
     @Override
     public ExistsRequestBuilder prepareExists(String... indices) {
+        deprecationLogger.deprecated("search exists api is deprecated and will be removed in the next major version, use search with size set to 0 and terminate_after set to 1 instead");
         return new ExistsRequestBuilder(this, ExistsAction.INSTANCE).setIndices(indices);
     }
 
@@ -1413,18 +1419,18 @@ public abstract class AbstractClient extends AbstractComponent implements Client
         }
 
         @Override
-        public ActionFuture<OptimizeResponse> optimize(final OptimizeRequest request) {
-            return execute(OptimizeAction.INSTANCE, request);
+        public ActionFuture<ForceMergeResponse> forceMerge(final ForceMergeRequest request) {
+            return execute(ForceMergeAction.INSTANCE, request);
         }
 
         @Override
-        public void optimize(final OptimizeRequest request, final ActionListener<OptimizeResponse> listener) {
-            execute(OptimizeAction.INSTANCE, request, listener);
+        public void forceMerge(final ForceMergeRequest request, final ActionListener<ForceMergeResponse> listener) {
+            execute(ForceMergeAction.INSTANCE, request, listener);
         }
 
         @Override
-        public OptimizeRequestBuilder prepareOptimize(String... indices) {
-            return new OptimizeRequestBuilder(this, OptimizeAction.INSTANCE).setIndices(indices);
+        public ForceMergeRequestBuilder prepareForceMerge(String... indices) {
+            return new ForceMergeRequestBuilder(this, ForceMergeAction.INSTANCE).setIndices(indices);
         }
 
         @Override

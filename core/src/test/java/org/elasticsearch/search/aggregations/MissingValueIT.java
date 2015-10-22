@@ -41,6 +41,7 @@ import static org.elasticsearch.search.aggregations.AggregationBuilders.stats;
 import static org.elasticsearch.search.aggregations.AggregationBuilders.terms;
 import static org.elasticsearch.test.hamcrest.ElasticsearchAssertions.assertAcked;
 import static org.elasticsearch.test.hamcrest.ElasticsearchAssertions.assertSearchResponse;
+import static org.hamcrest.Matchers.closeTo;
 
 @ESIntegTestCase.SuiteScopeTestCase
 public class MissingValueIT extends ESIntegTestCase {
@@ -182,23 +183,27 @@ public class MissingValueIT extends ESIntegTestCase {
         SearchResponse response = client().prepareSearch("idx").addAggregation(geoBounds("bounds").field("non_existing_field").missing("2,1")).get();
         assertSearchResponse(response);
         GeoBounds bounds = response.getAggregations().get("bounds");
-        assertEquals(new GeoPoint(2,1), bounds.bottomRight());
-        assertEquals(new GeoPoint(2,1), bounds.topLeft());
+        assertThat(bounds.bottomRight().lat(), closeTo(2.0, 1E-5));
+        assertThat(bounds.bottomRight().lon(), closeTo(1.0, 1E-5));
+        assertThat(bounds.topLeft().lat(), closeTo(2.0, 1E-5));
+        assertThat(bounds.topLeft().lon(), closeTo(1.0, 1E-5));
     }
 
     public void testGeoBounds() {
         SearchResponse response = client().prepareSearch("idx").addAggregation(geoBounds("bounds").field("location").missing("2,1")).get();
         assertSearchResponse(response);
         GeoBounds bounds = response.getAggregations().get("bounds");
-        assertEquals(new GeoPoint(1,2), bounds.bottomRight());
-        assertEquals(new GeoPoint(2,1), bounds.topLeft());
+        assertThat(bounds.bottomRight().lat(), closeTo(1.0, 1E-5));
+        assertThat(bounds.bottomRight().lon(), closeTo(2.0, 1E-5));
+        assertThat(bounds.topLeft().lat(), closeTo(2.0, 1E-5));
+        assertThat(bounds.topLeft().lon(), closeTo(1.0, 1E-5));
     }
 
     public void testGeoCentroid() {
         SearchResponse response = client().prepareSearch("idx").addAggregation(geoCentroid("centroid").field("location").missing("2,1")).get();
         assertSearchResponse(response);
         GeoCentroid centroid = response.getAggregations().get("centroid");
-        assertEquals(new GeoPoint(1.5, 1.5), centroid.centroid());
+        assertThat(centroid.centroid().lat(), closeTo(1.5, 1E-5));
+        assertThat(centroid.centroid().lon(), closeTo(1.5, 1E-5));
     }
-
 }
