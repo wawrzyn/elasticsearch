@@ -22,47 +22,46 @@ package org.apache.lucene.search;
 import org.apache.lucene.index.IndexReader;
 import org.elasticsearch.common.geo.GeoUtils;
 
+import java.io.IOException;
+
 /**
  *
  */
 public final class XGeoPointDistanceRangeQuery extends XGeoPointDistanceQuery {
-  protected final double minRadius;
+  protected final double minRadiusMeters;
 
   public XGeoPointDistanceRangeQuery(final String field, final double centerLon, final double centerLat,
                                      final double minRadius, final double maxRadius) {
     super(field, centerLon, centerLat, maxRadius);
-    this.minRadius = minRadius;
+    this.minRadiusMeters = minRadius;
   }
 
   @Override
-  public Query rewrite(IndexReader reader) {
+  public Query rewrite(IndexReader reader) throws IOException {
+    if (getBoost() != 1f) {
+      super.rewrite(reader);
+    }
     Query q = super.rewrite(reader);
-    if (minRadius == 0.0) {
+    if (minRadiusMeters == 0.0) {
       return q;
     }
 
-    final double radius;
-    if (q instanceof BooleanQuery) {
-      final BooleanClause[] clauses = ((BooleanQuery)q).getClauses();
-      assert clauses.length > 0;
-      radius = ((XGeoPointDistanceQueryImpl)(clauses[0].getQuery())).getRadius();
-    } else {
-      radius = ((XGeoPointDistanceQueryImpl)q).getRadius();
-    }
-
     // add an exclusion query
-    BooleanQuery bqb = new BooleanQuery();
+    BooleanQuery.Builder bqb = new BooleanQuery.Builder();
 
     // create a new exclusion query
-    XGeoPointDistanceQuery exclude = new XGeoPointDistanceQuery(field, centerLon, centerLat, minRadius);
-    // full map search
-    if (radius >= GeoUtils.EARTH_SEMI_MINOR_AXIS) {
-      bqb.add(new BooleanClause(new XGeoPointInBBoxQuery(this.field, -180.0, -90.0, 180.0, 90.0), BooleanClause.Occur.SHOULD));
-    } else {
-      bqb.add(new BooleanClause(q, BooleanClause.Occur.SHOULD));
-    }
+    XGeoPointDistanceQuery exclude = new XGeoPointDistanceQuery(field, centerLon, centerLat, minRadiusMeters);
+    bqb.add(new BooleanClause(q, BooleanClause.Occur.MUST));
     bqb.add(new BooleanClause(exclude, BooleanClause.Occur.MUST_NOT));
 
-    return bqb;
+    return bqb.build();
+  }
+
+  public double getMinRadiusMeters() {
+    return this.minRadiusMeters;
+  }
+
+  public double getMaxRadiusMeters() {
+    return this.radius;
   }
 }

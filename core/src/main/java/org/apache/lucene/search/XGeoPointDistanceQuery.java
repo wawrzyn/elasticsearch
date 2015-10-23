@@ -24,6 +24,8 @@ import org.apache.lucene.util.GeoProjectionUtils;
 import org.apache.lucene.util.XGeoUtils;
 import org.apache.lucene.util.ToStringUtils;
 
+import java.io.IOException;
+
 /** Implements a simple point distance query on a GeoPoint field. This is based on
  * {@link XGeoPointInBBoxQuery} and is implemented using a two phase approach. First,
  * like {@code GeoPointInBBoxQueryImpl} candidate terms are queried using the numeric ranges based on
@@ -72,9 +74,12 @@ public class XGeoPointDistanceQuery extends XGeoPointInBBoxQuery {
   }
 
   @Override
-  public Query rewrite(IndexReader reader) {
+  public Query rewrite(IndexReader reader) throws IOException {
+    if (getBoost() != 1f) {
+      return super.rewrite(reader);
+    }
     if (maxLon < minLon) {
-      BooleanQuery bqb = new BooleanQuery();
+      BooleanQuery.Builder bqb = new BooleanQuery.Builder();
 
       XGeoPointDistanceQueryImpl left = new XGeoPointDistanceQueryImpl(field, this, new GeoBoundingBox(-180.0D, maxLon,
           minLat, maxLat));
@@ -84,7 +89,7 @@ public class XGeoPointDistanceQuery extends XGeoPointInBBoxQuery {
           minLat, maxLat));
       right.setBoost(getBoost());
       bqb.add(new BooleanClause(right, BooleanClause.Occur.SHOULD));
-      return bqb;
+      return bqb.build();
     }
     return new XGeoPointDistanceQueryImpl(field, this, new GeoBoundingBox(this.minLon, this.maxLon, this.minLat, this.maxLat));
   }

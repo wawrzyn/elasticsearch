@@ -22,6 +22,8 @@ package org.apache.lucene.search;
 import org.apache.lucene.index.IndexReader;
 import org.apache.lucene.util.ToStringUtils;
 
+import java.io.IOException;
+
 /** Implements a simple bounding box query on a GeoPoint field. This is inspired by
  * {@link org.apache.lucene.search.NumericRangeQuery} and is implemented using a
  * two phase approach. First, candidate terms are queried using a numeric
@@ -57,17 +59,18 @@ public class XGeoPointInBBoxQuery extends Query {
   }
 
   @Override
-  public Query rewrite(IndexReader reader) {
+  public Query rewrite(IndexReader reader) throws IOException {
+    if (getBoost() != 1f) {
+      return super.rewrite(reader);
+    }
     if (maxLon < minLon) {
-      BooleanQuery q = new BooleanQuery(true);
+      BooleanQuery.Builder bq = new BooleanQuery.Builder();
 
       XGeoPointInBBoxQueryImpl left = new XGeoPointInBBoxQueryImpl(field, -180.0D, minLat, maxLon, maxLat);
-      left.setBoost(getBoost());
-      q.add(new BooleanClause(left, BooleanClause.Occur.SHOULD));
+      bq.add(new BooleanClause(left, BooleanClause.Occur.SHOULD));
       XGeoPointInBBoxQueryImpl right = new XGeoPointInBBoxQueryImpl(field, minLon, minLat, 180.0D, maxLat);
-      right.setBoost(getBoost());
-      q.add(new BooleanClause(right, BooleanClause.Occur.SHOULD));
-      return q;
+      bq.add(new BooleanClause(right, BooleanClause.Occur.SHOULD));
+      return bq.build();
     }
     return new XGeoPointInBBoxQueryImpl(field, minLon, minLat, maxLon, maxLat);
   }
