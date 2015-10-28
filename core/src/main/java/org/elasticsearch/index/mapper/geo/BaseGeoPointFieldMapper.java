@@ -21,7 +21,7 @@ package org.elasticsearch.index.mapper.geo;
 
 import com.google.common.collect.Iterators;
 import org.apache.lucene.index.IndexOptions;
-import org.apache.lucene.util.XGeoHashUtils;
+import org.apache.lucene.util.GeoHashUtils;
 import org.apache.lucene.util.NumericUtils;
 import org.elasticsearch.Version;
 import org.elasticsearch.common.Explicit;
@@ -80,7 +80,7 @@ public abstract class BaseGeoPointFieldMapper extends FieldMapper implements Arr
         public static final boolean ENABLE_LATLON = false;
         public static final boolean ENABLE_GEOHASH = false;
         public static final boolean ENABLE_GEOHASH_PREFIX = false;
-        public static final int GEO_HASH_PRECISION = XGeoHashUtils.PRECISION;
+        public static final int GEO_HASH_PRECISION = GeoHashUtils.PRECISION;
         public static final Explicit<Boolean> IGNORE_MALFORMED = new Explicit(false, false);
     }
 
@@ -401,7 +401,7 @@ public abstract class BaseGeoPointFieldMapper extends FieldMapper implements Arr
     protected void parse(ParseContext context, GeoPoint point, String geohash) throws IOException {
         if (fieldType().isGeohashEnabled()) {
             if (geohash == null) {
-                geohash = XGeoHashUtils.stringEncode(point.lon(), point.lat());
+                geohash = GeoHashUtils.stringEncode(point.lon(), point.lat());
             }
             addGeohashField(context, geohash);
         }

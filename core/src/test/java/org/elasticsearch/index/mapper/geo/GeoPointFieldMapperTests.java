@@ -18,10 +18,9 @@
  */
 package org.elasticsearch.index.mapper.geo;
 
-import org.apache.lucene.document.XGeoPointField;
-import org.apache.lucene.index.IndexableField;
-import org.apache.lucene.util.XGeoHashUtils;
-import org.apache.lucene.util.XGeoUtils;
+import org.apache.lucene.document.GeoPointField;
+import org.apache.lucene.util.GeoHashUtils;
+import org.apache.lucene.util.GeoUtils;
 import org.elasticsearch.Version;
 import org.elasticsearch.action.admin.indices.create.CreateIndexRequestBuilder;
 import org.elasticsearch.action.search.SearchResponse;
@@ -70,7 +69,7 @@ public class GeoPointFieldMapperTests extends ESSingleNodeTestCase {
         assertThat(doc.rootDoc().getField("point.lon"), notNullValue());
         assertThat(doc.rootDoc().getField("point.lon").fieldType().stored(), is(true));
         assertThat(doc.rootDoc().getField("point.geohash"), nullValue());
-        final long hash = XGeoUtils.mortonHash(1.3, 1.2);
+        final long hash = GeoUtils.mortonHash(1.3, 1.2);
         assertThat(Long.parseLong(doc.rootDoc().get("point")), equalTo(hash));
     }
 
@@ -90,7 +89,7 @@ public class GeoPointFieldMapperTests extends ESSingleNodeTestCase {
 
         assertThat(doc.rootDoc().getField("point.lat"), notNullValue());
         assertThat(doc.rootDoc().getField("point.lon"), notNullValue());
-        assertThat(doc.rootDoc().get("point.geohash"), equalTo(XGeoHashUtils.stringEncode(1.3, 1.2)));
+        assertThat(doc.rootDoc().get("point.geohash"), equalTo(GeoHashUtils.stringEncode(1.3, 1.2)));
     }
 
     @Test
@@ -107,11 +106,11 @@ public class GeoPointFieldMapperTests extends ESSingleNodeTestCase {
                 .endObject()
                 .bytes());
 
-        XGeoPointField geoPointField = (XGeoPointField)(doc.rootDoc().getField("point"));
+        GeoPointField geoPointField = (GeoPointField)(doc.rootDoc().getField("point"));
         assertThat(geoPointField, notNullValue());
-        assertThat(geoPointField.getLon(), closeTo(1.3, XGeoUtils.TOLERANCE));
-        assertThat(geoPointField.getLat(), closeTo(1.2, XGeoUtils.TOLERANCE));
-        assertThat(doc.rootDoc().get("point.geohash"), equalTo(XGeoHashUtils.stringEncode(1.3, 1.2)));
+        assertThat(geoPointField.getLon(), closeTo(1.3, GeoUtils.TOLERANCE));
+        assertThat(geoPointField.getLat(), closeTo(1.2, GeoUtils.TOLERANCE));
+        assertThat(doc.rootDoc().get("point.geohash"), equalTo(GeoHashUtils.stringEncode(1.3, 1.2)));
     }
 
     @Test
@@ -124,13 +123,13 @@ public class GeoPointFieldMapperTests extends ESSingleNodeTestCase {
 
         ParsedDocument doc = defaultMapper.parse("test", "type", "1", XContentFactory.jsonBuilder()
                 .startObject()
-                .field("point", XGeoHashUtils.stringEncode(1.3, 1.2))
+                .field("point", GeoHashUtils.stringEncode(1.3, 1.2))
                 .endObject()
                 .bytes());
 
         assertThat(doc.rootDoc().getField("point.lat"), notNullValue());
         assertThat(doc.rootDoc().getField("point.lon"), notNullValue());
-        assertThat(doc.rootDoc().get("point.geohash"), equalTo(XGeoHashUtils.stringEncode(1.3, 1.2)));
+        assertThat(doc.rootDoc().get("point.geohash"), equalTo(GeoHashUtils.stringEncode(1.3, 1.2)));
     }
 
     @Test
@@ -143,15 +142,15 @@ public class GeoPointFieldMapperTests extends ESSingleNodeTestCase {
 
         ParsedDocument doc = defaultMapper.parse("test", "type", "1", XContentFactory.jsonBuilder()
                 .startObject()
-                .field("point", XGeoHashUtils.stringEncode(1.3, 1.2))
+                .field("point", GeoHashUtils.stringEncode(1.3, 1.2))
                 .endObject()
                 .bytes());
-        XGeoPointField geoPtField = (XGeoPointField)(doc.rootDoc().getField("point"));
+        GeoPointField geoPtField = (GeoPointField)(doc.rootDoc().getField("point"));
         GeoPoint pt = new GeoPoint(geoPtField.getLat(), geoPtField.getLon());
 
         assertThat(pt, notNullValue());
-        assertThat(pt.getLon(), closeTo(1.3, XGeoUtils.TOLERANCE));
-        assertThat(pt.getLat(), closeTo(1.2, XGeoUtils.TOLERANCE));
+        assertThat(pt.getLon(), closeTo(1.3, GeoUtils.TOLERANCE));
+        assertThat(pt.getLat(), closeTo(1.2, GeoUtils.TOLERANCE));
     }
 
     @Test
@@ -169,7 +168,7 @@ public class GeoPointFieldMapperTests extends ESSingleNodeTestCase {
                 .endObject()
                 .bytes());
 
-        long hash = XGeoUtils.mortonHash(1.0, 89.0);
+        long hash = GeoUtils.mortonHash(1.0, 89.0);
         assertThat(Long.parseLong(doc.rootDoc().get("point")), equalTo(hash));
 
         doc = defaultMapper.parse("test", "type", "1", XContentFactory.jsonBuilder()
@@ -178,7 +177,7 @@ public class GeoPointFieldMapperTests extends ESSingleNodeTestCase {
                 .endObject()
                 .bytes());
 
-        hash = XGeoUtils.mortonHash(-1.0, -89.0);
+        hash = GeoUtils.mortonHash(-1.0, -89.0);
         assertThat(Long.parseLong(doc.rootDoc().get("point")), equalTo(hash));
 
         doc = defaultMapper.parse("test", "type", "1", XContentFactory.jsonBuilder()
@@ -187,7 +186,7 @@ public class GeoPointFieldMapperTests extends ESSingleNodeTestCase {
                 .endObject()
                 .bytes());
 
-        hash = XGeoUtils.mortonHash(-179.0, -1.0);
+        hash = GeoUtils.mortonHash(-179.0, -1.0);
         assertThat(Long.parseLong(doc.rootDoc().get("point")), equalTo(hash));
     }
 
@@ -308,7 +307,7 @@ public class GeoPointFieldMapperTests extends ESSingleNodeTestCase {
         assertThat(doc.rootDoc().getField("point.lon"), notNullValue());
         assertThat(doc.rootDoc().getField("point.lon").numericValue().doubleValue(), equalTo(1.3));
         assertThat(doc.rootDoc().getField("point.geohash"), nullValue());
-        final long hash = XGeoUtils.mortonHash(1.3, 1.2);
+        final long hash = GeoUtils.mortonHash(1.3, 1.2);
         assertThat(Long.parseLong(doc.rootDoc().get("point")), equalTo(hash));
     }
 
@@ -333,11 +332,11 @@ public class GeoPointFieldMapperTests extends ESSingleNodeTestCase {
         assertThat(doc.rootDoc().getFields("point.lon").length, equalTo(2));
         assertThat(doc.rootDoc().getFields("point.lat")[0].numericValue().doubleValue(), equalTo(1.2));
         assertThat(doc.rootDoc().getFields("point.lon")[0].numericValue().doubleValue(), equalTo(1.3));
-        long hash = XGeoUtils.mortonHash(1.3, 1.2);
+        long hash = GeoUtils.mortonHash(1.3, 1.2);
         assertThat(Long.parseLong(doc.rootDoc().getFields("point")[0].stringValue()), equalTo(hash));
         assertThat(doc.rootDoc().getFields("point.lat")[1].numericValue().doubleValue(), equalTo(1.4));
         assertThat(doc.rootDoc().getFields("point.lon")[1].numericValue().doubleValue(), equalTo(1.5));
-        hash = XGeoUtils.mortonHash(1.5, 1.4);
+        hash = GeoUtils.mortonHash(1.5, 1.4);
         assertThat(Long.parseLong(doc.rootDoc().getFields("point")[1].stringValue()), equalTo(hash));
     }
 
@@ -357,7 +356,7 @@ public class GeoPointFieldMapperTests extends ESSingleNodeTestCase {
 
         assertThat(doc.rootDoc().getField("point.lat"), notNullValue());
         assertThat(doc.rootDoc().getField("point.lon"), notNullValue());
-        assertThat(Long.parseLong(doc.rootDoc().get("point")), equalTo(XGeoUtils.mortonHash(1.3, 1.2)));
+        assertThat(Long.parseLong(doc.rootDoc().get("point")), equalTo(GeoUtils.mortonHash(1.3, 1.2)));
     }
 
     @Test
@@ -378,7 +377,7 @@ public class GeoPointFieldMapperTests extends ESSingleNodeTestCase {
         assertThat(doc.rootDoc().getField("point.lat").numericValue().doubleValue(), equalTo(1.2));
         assertThat(doc.rootDoc().getField("point.lon"), notNullValue());
         assertThat(doc.rootDoc().getField("point.lon").numericValue().doubleValue(), equalTo(1.3));
-        assertThat(Long.parseLong(doc.rootDoc().get("point")), equalTo(XGeoUtils.mortonHash(1.3, 1.2)));
+        assertThat(Long.parseLong(doc.rootDoc().get("point")), equalTo(GeoUtils.mortonHash(1.3, 1.2)));
     }
 
     @Test
@@ -400,13 +399,13 @@ public class GeoPointFieldMapperTests extends ESSingleNodeTestCase {
 
         assertThat(doc.rootDoc().getFields("point.lat").length, equalTo(2));
         assertThat(doc.rootDoc().getFields("point.lon").length, equalTo(2));
-        long hash = XGeoUtils.mortonHash(1.3, 1.2);
+        long hash = GeoUtils.mortonHash(1.3, 1.2);
         assertThat(doc.rootDoc().getFields("point.lat")[0].numericValue().doubleValue(), equalTo(1.2));
         assertThat(doc.rootDoc().getFields("point.lon")[0].numericValue().doubleValue(), equalTo(1.3));
         assertThat(Long.parseLong(doc.rootDoc().getFields("point")[0].stringValue()), equalTo(hash));
         assertThat(doc.rootDoc().getFields("point.lat")[1].numericValue().doubleValue(), equalTo(1.4));
         assertThat(doc.rootDoc().getFields("point.lon")[1].numericValue().doubleValue(), equalTo(1.5));
-        hash = XGeoUtils.mortonHash(1.5, 1.4);
+        hash = GeoUtils.mortonHash(1.5, 1.4);
         assertThat(Long.parseLong(doc.rootDoc().getFields("point")[1].stringValue()), equalTo(hash));
     }
 
@@ -426,7 +425,7 @@ public class GeoPointFieldMapperTests extends ESSingleNodeTestCase {
 
         assertThat(doc.rootDoc().getField("point.lat"), notNullValue());
         assertThat(doc.rootDoc().getField("point.lon"), notNullValue());
-        final long hash = XGeoUtils.mortonHash(1.3, 1.2);
+        final long hash = GeoUtils.mortonHash(1.3, 1.2);
         assertThat(Long.parseLong(doc.rootDoc().get("point")), equalTo(hash));
     }
 
@@ -448,7 +447,7 @@ public class GeoPointFieldMapperTests extends ESSingleNodeTestCase {
 
         assertThat(doc.rootDoc().getField("point.lat"), notNullValue());
         assertThat(doc.rootDoc().getField("point.lon"), notNullValue());
-        final long hash = XGeoUtils.mortonHash(1.3, 1.2);
+        final long hash = GeoUtils.mortonHash(1.3, 1.2);
         assertThat(Long.parseLong(doc.rootDoc().get("point")), equalTo(hash));
     }
 
@@ -470,7 +469,7 @@ public class GeoPointFieldMapperTests extends ESSingleNodeTestCase {
         assertThat(doc.rootDoc().getField("point.lat").numericValue().doubleValue(), equalTo(1.2));
         assertThat(doc.rootDoc().getField("point.lon"), notNullValue());
         assertThat(doc.rootDoc().getField("point.lon").numericValue().doubleValue(), equalTo(1.3));
-        final long hash = XGeoUtils.mortonHash(1.3, 1.2);
+        final long hash = GeoUtils.mortonHash(1.3, 1.2);
         assertThat(Long.parseLong(doc.rootDoc().get("point")), equalTo(hash));
     }
 
@@ -495,11 +494,11 @@ public class GeoPointFieldMapperTests extends ESSingleNodeTestCase {
         assertThat(doc.rootDoc().getFields("point.lon").length, equalTo(2));
         assertThat(doc.rootDoc().getFields("point.lat")[0].numericValue().doubleValue(), equalTo(1.2));
         assertThat(doc.rootDoc().getFields("point.lon")[0].numericValue().doubleValue(), equalTo(1.3));
-        long hash = XGeoUtils.mortonHash(1.3, 1.2);
+        long hash = GeoUtils.mortonHash(1.3, 1.2);
         assertThat(Long.parseLong(doc.rootDoc().getFields("point")[0].stringValue()), equalTo(hash));
         assertThat(doc.rootDoc().getFields("point.lat")[1].numericValue().doubleValue(), equalTo(1.4));
         assertThat(doc.rootDoc().getFields("point.lon")[1].numericValue().doubleValue(), equalTo(1.5));
-        hash = XGeoUtils.mortonHash(1.5, 1.4);
+        hash = GeoUtils.mortonHash(1.5, 1.4);
         assertThat(Long.parseLong(doc.rootDoc().getFields("point")[1].stringValue()), equalTo(hash));
     }
 

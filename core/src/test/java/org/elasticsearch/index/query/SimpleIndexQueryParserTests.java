@@ -32,36 +32,20 @@ import org.apache.lucene.search.BooleanQuery;
 import org.apache.lucene.search.ConstantScoreQuery;
 import org.apache.lucene.search.DisjunctionMaxQuery;
 import org.apache.lucene.search.FuzzyQuery;
-import org.apache.lucene.search.XGeoPointDistanceQuery;
-import org.apache.lucene.search.XGeoPointInBBoxQuery;
-import org.apache.lucene.search.XGeoPointInPolygonQuery;
+import org.apache.lucene.search.GeoPointDistanceQuery;
+import org.apache.lucene.search.GeoPointInBBoxQuery;
+import org.apache.lucene.search.GeoPointInPolygonQuery;
 import org.apache.lucene.search.MatchAllDocsQuery;
 import org.apache.lucene.search.MultiTermQuery;
 import org.apache.lucene.search.NumericRangeQuery;
 import org.apache.lucene.search.PrefixQuery;
 import org.apache.lucene.search.Query;
-import org.apache.lucene.search.QueryWrapperFilter;
 import org.apache.lucene.search.RegexpQuery;
 import org.apache.lucene.search.TermQuery;
 import org.apache.lucene.search.TermRangeQuery;
 import org.apache.lucene.search.WildcardQuery;
 import org.apache.lucene.search.join.ToParentBlockJoinQuery;
-import org.apache.lucene.search.spans.*;
-import org.apache.lucene.search.BooleanQuery;
 import org.apache.lucene.search.BoostQuery;
-import org.apache.lucene.search.ConstantScoreQuery;
-import org.apache.lucene.search.DisjunctionMaxQuery;
-import org.apache.lucene.search.FuzzyQuery;
-import org.apache.lucene.search.MatchAllDocsQuery;
-import org.apache.lucene.search.MultiTermQuery;
-import org.apache.lucene.search.NumericRangeQuery;
-import org.apache.lucene.search.PrefixQuery;
-import org.apache.lucene.search.Query;
-import org.apache.lucene.search.QueryWrapperFilter;
-import org.apache.lucene.search.RegexpQuery;
-import org.apache.lucene.search.TermQuery;
-import org.apache.lucene.search.TermRangeQuery;
-import org.apache.lucene.search.WildcardQuery;
 import org.apache.lucene.search.spans.FieldMaskingSpanQuery;
 import org.apache.lucene.search.spans.SpanContainingQuery;
 import org.apache.lucene.search.spans.SpanFirstQuery;
@@ -1835,12 +1819,12 @@ public class SimpleIndexQueryParserTests extends ESSingleNodeTestCase {
         assertThat(booleanClause.getQuery(), instanceOf(MatchAllDocsQuery.class));
         booleanClause = booleanQuery.clauses().get(1);
         assertThat(booleanClause.getOccur(), equalTo(Occur.FILTER));
-        assertThat(booleanClause.getQuery(), instanceOf(XGeoPointDistanceQuery.class));
-        XGeoPointDistanceQuery filter = (XGeoPointDistanceQuery) booleanClause.getQuery();
+        assertThat(booleanClause.getQuery(), instanceOf(GeoPointDistanceQuery.class));
+        GeoPointDistanceQuery filter = (GeoPointDistanceQuery) booleanClause.getQuery();
         assertThat(filter.getField(), equalTo("location"));
         assertThat(filter.getCenterLat(), closeTo(40, 0.00001));
         assertThat(filter.getCenterLon(), closeTo(-70, 0.00001));
-        assertThat(filter.getRadius(), closeTo(DistanceUnit.DEFAULT.convert(12, DistanceUnit.MILES), 0.00001));
+        assertThat(filter.getRadiusMeters(), closeTo(DistanceUnit.DEFAULT.convert(12, DistanceUnit.MILES), 0.00001));
     }
 
     @Test
@@ -1856,12 +1840,12 @@ public class SimpleIndexQueryParserTests extends ESSingleNodeTestCase {
         assertThat(booleanClause.getQuery(), instanceOf(MatchAllDocsQuery.class));
         booleanClause = booleanQuery.clauses().get(1);
         assertThat(booleanClause.getOccur(), equalTo(Occur.FILTER));
-        assertThat(booleanClause.getQuery(), instanceOf(XGeoPointDistanceQuery.class));
-        XGeoPointDistanceQuery filter = (XGeoPointDistanceQuery) booleanClause.getQuery();
+        assertThat(booleanClause.getQuery(), instanceOf(GeoPointDistanceQuery.class));
+        GeoPointDistanceQuery filter = (GeoPointDistanceQuery) booleanClause.getQuery();
         assertThat(filter.getField(), equalTo("location"));
         assertThat(filter.getCenterLat(), closeTo(40, 0.00001));
         assertThat(filter.getCenterLon(), closeTo(-70, 0.00001));
-        assertThat(filter.getRadius(), closeTo(DistanceUnit.DEFAULT.convert(12, DistanceUnit.MILES), 0.00001));
+        assertThat(filter.getRadiusMeters(), closeTo(DistanceUnit.DEFAULT.convert(12, DistanceUnit.MILES), 0.00001));
     }
 
     @Test
@@ -1877,12 +1861,12 @@ public class SimpleIndexQueryParserTests extends ESSingleNodeTestCase {
         assertThat(booleanClause.getQuery(), instanceOf(MatchAllDocsQuery.class));
         booleanClause = booleanQuery.clauses().get(1);
         assertThat(booleanClause.getOccur(), equalTo(Occur.FILTER));
-        assertThat(booleanClause.getQuery(), instanceOf(XGeoPointDistanceQuery.class));
-        XGeoPointDistanceQuery filter = (XGeoPointDistanceQuery) booleanClause.getQuery();
+        assertThat(booleanClause.getQuery(), instanceOf(GeoPointDistanceQuery.class));
+        GeoPointDistanceQuery filter = (GeoPointDistanceQuery) booleanClause.getQuery();
         assertThat(filter.getField(), equalTo("location"));
         assertThat(filter.getCenterLat(), closeTo(40, 0.00001));
         assertThat(filter.getCenterLon(), closeTo(-70, 0.00001));
-        assertThat(filter.getRadius(), closeTo(DistanceUnit.DEFAULT.convert(12, DistanceUnit.MILES), 0.00001));
+        assertThat(filter.getRadiusMeters(), closeTo(DistanceUnit.DEFAULT.convert(12, DistanceUnit.MILES), 0.00001));
     }
 
     @Test
@@ -1898,12 +1882,12 @@ public class SimpleIndexQueryParserTests extends ESSingleNodeTestCase {
         assertThat(booleanClause.getQuery(), instanceOf(MatchAllDocsQuery.class));
         booleanClause = booleanQuery.clauses().get(1);
         assertThat(booleanClause.getOccur(), equalTo(Occur.FILTER));
-        assertThat(booleanClause.getQuery(), instanceOf(XGeoPointDistanceQuery.class));
-        XGeoPointDistanceQuery filter = (XGeoPointDistanceQuery) booleanClause.getQuery();
+        assertThat(booleanClause.getQuery(), instanceOf(GeoPointDistanceQuery.class));
+        GeoPointDistanceQuery filter = (GeoPointDistanceQuery) booleanClause.getQuery();
         assertThat(filter.getField(), equalTo("location"));
         assertThat(filter.getCenterLat(), closeTo(40, 0.00001));
         assertThat(filter.getCenterLon(), closeTo(-70, 0.00001));
-        assertThat(filter.getRadius(), closeTo(DistanceUnit.DEFAULT.convert(12, DistanceUnit.MILES), 0.00001));
+        assertThat(filter.getRadiusMeters(), closeTo(DistanceUnit.DEFAULT.convert(12, DistanceUnit.MILES), 0.00001));
     }
 
     @Test
@@ -1919,12 +1903,12 @@ public class SimpleIndexQueryParserTests extends ESSingleNodeTestCase {
         assertThat(booleanClause.getQuery(), instanceOf(MatchAllDocsQuery.class));
         booleanClause = booleanQuery.clauses().get(1);
         assertThat(booleanClause.getOccur(), equalTo(Occur.FILTER));
-        assertThat(booleanClause.getQuery(), instanceOf(XGeoPointDistanceQuery.class));
-        XGeoPointDistanceQuery filter = (XGeoPointDistanceQuery) booleanClause.getQuery();
+        assertThat(booleanClause.getQuery(), instanceOf(GeoPointDistanceQuery.class));
+        GeoPointDistanceQuery filter = (GeoPointDistanceQuery) booleanClause.getQuery();
         assertThat(filter.getField(), equalTo("location"));
         assertThat(filter.getCenterLat(), closeTo(40, 0.00001));
         assertThat(filter.getCenterLon(), closeTo(-70, 0.00001));
-        assertThat(filter.getRadius(), closeTo(DistanceUnit.DEFAULT.convert(12, DistanceUnit.MILES), 0.00001));
+        assertThat(filter.getRadiusMeters(), closeTo(DistanceUnit.DEFAULT.convert(12, DistanceUnit.MILES), 0.00001));
     }
 
     @Test
@@ -1940,12 +1924,12 @@ public class SimpleIndexQueryParserTests extends ESSingleNodeTestCase {
         assertThat(booleanClause.getQuery(), instanceOf(MatchAllDocsQuery.class));
         booleanClause = booleanQuery.clauses().get(1);
         assertThat(booleanClause.getOccur(), equalTo(Occur.FILTER));
-        assertThat(booleanClause.getQuery(), instanceOf(XGeoPointDistanceQuery.class));
-        XGeoPointDistanceQuery filter = (XGeoPointDistanceQuery) booleanClause.getQuery();
+        assertThat(booleanClause.getQuery(), instanceOf(GeoPointDistanceQuery.class));
+        GeoPointDistanceQuery filter = (GeoPointDistanceQuery) booleanClause.getQuery();
         assertThat(filter.getField(), equalTo("location"));
         assertThat(filter.getCenterLat(), closeTo(40, 0.00001));
         assertThat(filter.getCenterLon(), closeTo(-70, 0.00001));
-        assertThat(filter.getRadius(), closeTo(DistanceUnit.DEFAULT.convert(12, DistanceUnit.MILES), 0.00001));
+        assertThat(filter.getRadiusMeters(), closeTo(DistanceUnit.DEFAULT.convert(12, DistanceUnit.MILES), 0.00001));
     }
 
     @Test
@@ -1961,12 +1945,12 @@ public class SimpleIndexQueryParserTests extends ESSingleNodeTestCase {
         assertThat(booleanClause.getQuery(), instanceOf(MatchAllDocsQuery.class));
         booleanClause = booleanQuery.clauses().get(1);
         assertThat(booleanClause.getOccur(), equalTo(Occur.FILTER));
-        assertThat(booleanClause.getQuery(), instanceOf(XGeoPointDistanceQuery.class));
-        XGeoPointDistanceQuery filter = (XGeoPointDistanceQuery) booleanClause.getQuery();
+        assertThat(booleanClause.getQuery(), instanceOf(GeoPointDistanceQuery.class));
+        GeoPointDistanceQuery filter = (GeoPointDistanceQuery) booleanClause.getQuery();
         assertThat(filter.getField(), equalTo("location"));
         assertThat(filter.getCenterLat(), closeTo(40, 0.00001));
         assertThat(filter.getCenterLon(), closeTo(-70, 0.00001));
-        assertThat(filter.getRadius(), closeTo(DistanceUnit.DEFAULT.convert(12, DistanceUnit.MILES), 0.00001));
+        assertThat(filter.getRadiusMeters(), closeTo(DistanceUnit.DEFAULT.convert(12, DistanceUnit.MILES), 0.00001));
     }
 
     @Test
@@ -1982,12 +1966,12 @@ public class SimpleIndexQueryParserTests extends ESSingleNodeTestCase {
         assertThat(booleanClause.getQuery(), instanceOf(MatchAllDocsQuery.class));
         booleanClause = booleanQuery.clauses().get(1);
         assertThat(booleanClause.getOccur(), equalTo(Occur.FILTER));
-        assertThat(booleanClause.getQuery(), instanceOf(XGeoPointDistanceQuery.class));
-        XGeoPointDistanceQuery filter = (XGeoPointDistanceQuery) booleanClause.getQuery();
+        assertThat(booleanClause.getQuery(), instanceOf(GeoPointDistanceQuery.class));
+        GeoPointDistanceQuery filter = (GeoPointDistanceQuery) booleanClause.getQuery();
         assertThat(filter.getField(), equalTo("location"));
         assertThat(filter.getCenterLat(), closeTo(40, 0.00001));
         assertThat(filter.getCenterLon(), closeTo(-70, 0.00001));
-        assertThat(filter.getRadius(), closeTo(DistanceUnit.DEFAULT.convert(0.012, DistanceUnit.MILES), 0.00001));
+        assertThat(filter.getRadiusMeters(), closeTo(DistanceUnit.DEFAULT.convert(0.012, DistanceUnit.MILES), 0.00001));
     }
 
     @Test
@@ -2003,12 +1987,12 @@ public class SimpleIndexQueryParserTests extends ESSingleNodeTestCase {
         assertThat(booleanClause.getQuery(), instanceOf(MatchAllDocsQuery.class));
         booleanClause = booleanQuery.clauses().get(1);
         assertThat(booleanClause.getOccur(), equalTo(Occur.FILTER));
-        assertThat(booleanClause.getQuery(), instanceOf(XGeoPointDistanceQuery.class));
-        XGeoPointDistanceQuery filter = (XGeoPointDistanceQuery) booleanClause.getQuery();
+        assertThat(booleanClause.getQuery(), instanceOf(GeoPointDistanceQuery.class));
+        GeoPointDistanceQuery filter = (GeoPointDistanceQuery) booleanClause.getQuery();
         assertThat(filter.getField(), equalTo("location"));
         assertThat(filter.getCenterLat(), closeTo(40, 0.00001));
         assertThat(filter.getCenterLon(), closeTo(-70, 0.00001));
-        assertThat(filter.getRadius(), closeTo(DistanceUnit.KILOMETERS.convert(12, DistanceUnit.MILES), 0.00001));
+        assertThat(filter.getRadiusMeters(), closeTo(DistanceUnit.KILOMETERS.convert(12, DistanceUnit.MILES), 0.00001));
     }
 
     @Test
@@ -2024,12 +2008,12 @@ public class SimpleIndexQueryParserTests extends ESSingleNodeTestCase {
         assertThat(booleanClause.getQuery(), instanceOf(MatchAllDocsQuery.class));
         booleanClause = booleanQuery.clauses().get(1);
         assertThat(booleanClause.getOccur(), equalTo(Occur.FILTER));
-        assertThat(booleanClause.getQuery(), instanceOf(XGeoPointDistanceQuery.class));
-        XGeoPointDistanceQuery filter = (XGeoPointDistanceQuery) booleanClause.getQuery();
+        assertThat(booleanClause.getQuery(), instanceOf(GeoPointDistanceQuery.class));
+        GeoPointDistanceQuery filter = (GeoPointDistanceQuery) booleanClause.getQuery();
         assertThat(filter.getField(), equalTo("location"));
         assertThat(filter.getCenterLat(), closeTo(40, 0.00001));
         assertThat(filter.getCenterLon(), closeTo(-70, 0.00001));
-        assertThat(filter.getRadius(), closeTo(DistanceUnit.DEFAULT.convert(12, DistanceUnit.MILES), 0.00001));
+        assertThat(filter.getRadiusMeters(), closeTo(DistanceUnit.DEFAULT.convert(12, DistanceUnit.MILES), 0.00001));
     }
 
     @Test
@@ -2045,12 +2029,12 @@ public class SimpleIndexQueryParserTests extends ESSingleNodeTestCase {
         assertThat(booleanClause.getQuery(), instanceOf(MatchAllDocsQuery.class));
         booleanClause = booleanQuery.clauses().get(1);
         assertThat(booleanClause.getOccur(), equalTo(Occur.FILTER));
-        assertThat(booleanClause.getQuery(), instanceOf(XGeoPointDistanceQuery.class));
-        XGeoPointDistanceQuery filter = (XGeoPointDistanceQuery) booleanClause.getQuery();
+        assertThat(booleanClause.getQuery(), instanceOf(GeoPointDistanceQuery.class));
+        GeoPointDistanceQuery filter = (GeoPointDistanceQuery) booleanClause.getQuery();
         assertThat(filter.getField(), equalTo("location"));
         assertThat(filter.getCenterLat(), closeTo(40, 0.00001));
         assertThat(filter.getCenterLon(), closeTo(-70, 0.00001));
-        assertThat(filter.getRadius(), closeTo(DistanceUnit.DEFAULT.convert(12, DistanceUnit.MILES), 0.00001));
+        assertThat(filter.getRadiusMeters(), closeTo(DistanceUnit.DEFAULT.convert(12, DistanceUnit.MILES), 0.00001));
     }
 
     @Test
@@ -2066,12 +2050,12 @@ public class SimpleIndexQueryParserTests extends ESSingleNodeTestCase {
         assertThat(booleanClause.getQuery(), instanceOf(MatchAllDocsQuery.class));
         booleanClause = booleanQuery.clauses().get(1);
         assertThat(booleanClause.getOccur(), equalTo(Occur.FILTER));
-        assertThat(booleanClause.getQuery(), instanceOf(XGeoPointDistanceQuery.class));
-        XGeoPointDistanceQuery filter = (XGeoPointDistanceQuery) booleanClause.getQuery();
+        assertThat(booleanClause.getQuery(), instanceOf(GeoPointDistanceQuery.class));
+        GeoPointDistanceQuery filter = (GeoPointDistanceQuery) booleanClause.getQuery();
         assertThat(filter.getField(), equalTo("location"));
         assertThat(filter.getCenterLat(), closeTo(40, 0.00001));
         assertThat(filter.getCenterLon(), closeTo(-70, 0.00001));
-        assertThat(filter.getRadius(), closeTo(DistanceUnit.DEFAULT.convert(12, DistanceUnit.MILES), 0.00001));
+        assertThat(filter.getRadiusMeters(), closeTo(DistanceUnit.DEFAULT.convert(12, DistanceUnit.MILES), 0.00001));
     }
 
     @Test
@@ -2087,11 +2071,11 @@ public class SimpleIndexQueryParserTests extends ESSingleNodeTestCase {
         assertThat(booleanClause.getQuery(), instanceOf(MatchAllDocsQuery.class));
         booleanClause = booleanQuery.clauses().get(1);
         assertThat(booleanClause.getOccur(), equalTo(Occur.FILTER));
-        assertThat(booleanClause.getQuery(), instanceOf(XGeoPointDistanceQuery.class));
-        XGeoPointDistanceQuery filter = (XGeoPointDistanceQuery) booleanClause.getQuery();
+        assertThat(booleanClause.getQuery(), instanceOf(GeoPointDistanceQuery.class));
+        GeoPointDistanceQuery filter = (GeoPointDistanceQuery) booleanClause.getQuery();
         assertThat(filter.getField(), equalTo("location"));
         assertThat(filter.getCenterLat(), closeTo(40, 0.00001));
-        assertThat(filter.getRadius(), closeTo(DistanceUnit.DEFAULT.convert(12, DistanceUnit.MILES), 0.00001));
+        assertThat(filter.getRadiusMeters(), closeTo(DistanceUnit.DEFAULT.convert(12, DistanceUnit.MILES), 0.00001));
     }
 
     @Test
@@ -2108,8 +2092,8 @@ public class SimpleIndexQueryParserTests extends ESSingleNodeTestCase {
         assertThat(booleanClause.getQuery(), instanceOf(MatchAllDocsQuery.class));
         booleanClause = booleanQuery.clauses().get(1);
         assertThat(booleanClause.getOccur(), equalTo(Occur.FILTER));
-        assertThat(booleanClause.getQuery(), instanceOf(XGeoPointInBBoxQuery.class));
-        XGeoPointInBBoxQuery filter = (XGeoPointInBBoxQuery) booleanClause.getQuery();
+        assertThat(booleanClause.getQuery(), instanceOf(GeoPointInBBoxQuery.class));
+        GeoPointInBBoxQuery filter = (GeoPointInBBoxQuery) booleanClause.getQuery();
         assertThat(filter.getField(), equalTo("location"));
         assertThat(filter.getMaxLat(), closeTo(40, 0.00001));
         assertThat(filter.getMinLon(), closeTo(-70, 0.00001));
@@ -2130,8 +2114,8 @@ public class SimpleIndexQueryParserTests extends ESSingleNodeTestCase {
         assertThat(booleanClause.getQuery(), instanceOf(MatchAllDocsQuery.class));
         booleanClause = booleanQuery.clauses().get(1);
         assertThat(booleanClause.getOccur(), equalTo(Occur.FILTER));
-        assertThat(booleanClause.getQuery(), instanceOf(XGeoPointInBBoxQuery.class));
-        XGeoPointInBBoxQuery filter = (XGeoPointInBBoxQuery) booleanClause.getQuery();
+        assertThat(booleanClause.getQuery(), instanceOf(GeoPointInBBoxQuery.class));
+        GeoPointInBBoxQuery filter = (GeoPointInBBoxQuery) booleanClause.getQuery();
         assertThat(filter.getField(), equalTo("location"));
         assertThat(filter.getMaxLat(), closeTo(40, 0.00001));
         assertThat(filter.getMinLon(), closeTo(-70, 0.00001));
@@ -2152,8 +2136,8 @@ public class SimpleIndexQueryParserTests extends ESSingleNodeTestCase {
         assertThat(booleanClause.getQuery(), instanceOf(MatchAllDocsQuery.class));
         booleanClause = booleanQuery.clauses().get(1);
         assertThat(booleanClause.getOccur(), equalTo(Occur.FILTER));
-        assertThat(booleanClause.getQuery(), instanceOf(XGeoPointInBBoxQuery.class));
-        XGeoPointInBBoxQuery filter = (XGeoPointInBBoxQuery) booleanClause.getQuery();
+        assertThat(booleanClause.getQuery(), instanceOf(GeoPointInBBoxQuery.class));
+        GeoPointInBBoxQuery filter = (GeoPointInBBoxQuery) booleanClause.getQuery();
         assertThat(filter.getField(), equalTo("location"));
         assertThat(filter.getMaxLat(), closeTo(40, 0.00001));
         assertThat(filter.getMinLon(), closeTo(-70, 0.00001));
@@ -2174,8 +2158,8 @@ public class SimpleIndexQueryParserTests extends ESSingleNodeTestCase {
         assertThat(booleanClause.getQuery(), instanceOf(MatchAllDocsQuery.class));
         booleanClause = booleanQuery.clauses().get(1);
         assertThat(booleanClause.getOccur(), equalTo(Occur.FILTER));
-        assertThat(booleanClause.getQuery(), instanceOf(XGeoPointInBBoxQuery.class));
-        XGeoPointInBBoxQuery filter = (XGeoPointInBBoxQuery) booleanClause.getQuery();
+        assertThat(booleanClause.getQuery(), instanceOf(GeoPointInBBoxQuery.class));
+        GeoPointInBBoxQuery filter = (GeoPointInBBoxQuery) booleanClause.getQuery();
         assertThat(filter.getField(), equalTo("location"));
         assertThat(filter.getMaxLat(), closeTo(40, 0.00001));
         assertThat(filter.getMinLon(), closeTo(-70, 0.00001));
@@ -2196,8 +2180,8 @@ public class SimpleIndexQueryParserTests extends ESSingleNodeTestCase {
         assertThat(booleanClause.getQuery(), instanceOf(MatchAllDocsQuery.class));
         booleanClause = booleanQuery.clauses().get(1);
         assertThat(booleanClause.getOccur(), equalTo(Occur.FILTER));
-        assertThat(booleanClause.getQuery(), instanceOf(XGeoPointInBBoxQuery.class));
-        XGeoPointInBBoxQuery filter = (XGeoPointInBBoxQuery) booleanClause.getQuery();
+        assertThat(booleanClause.getQuery(), instanceOf(GeoPointInBBoxQuery.class));
+        GeoPointInBBoxQuery filter = (GeoPointInBBoxQuery) booleanClause.getQuery();
         assertThat(filter.getField(), equalTo("location"));
         assertThat(filter.getMaxLat(), closeTo(40, 0.00001));
         assertThat(filter.getMinLon(), closeTo(-70, 0.00001));
@@ -2218,8 +2202,8 @@ public class SimpleIndexQueryParserTests extends ESSingleNodeTestCase {
         assertThat(booleanClause.getQuery(), instanceOf(MatchAllDocsQuery.class));
         booleanClause = booleanQuery.clauses().get(1);
         assertThat(booleanClause.getOccur(), equalTo(Occur.FILTER));
-        assertThat(booleanClause.getQuery(), instanceOf(XGeoPointInBBoxQuery.class));
-        XGeoPointInBBoxQuery filter = (XGeoPointInBBoxQuery) booleanClause.getQuery();
+        assertThat(booleanClause.getQuery(), instanceOf(GeoPointInBBoxQuery.class));
+        GeoPointInBBoxQuery filter = (GeoPointInBBoxQuery) booleanClause.getQuery();
         assertThat(filter.getField(), equalTo("location"));
         assertThat(filter.getMaxLat(), closeTo(40, 0.00001));
         assertThat(filter.getMinLon(), closeTo(-70, 0.00001));
@@ -2240,8 +2224,8 @@ public class SimpleIndexQueryParserTests extends ESSingleNodeTestCase {
         assertThat(booleanClause.getQuery(), instanceOf(MatchAllDocsQuery.class));
         booleanClause = booleanQuery.clauses().get(1);
         assertThat(booleanClause.getOccur(), equalTo(Occur.FILTER));
-        assertThat(booleanClause.getQuery(), instanceOf(XGeoPointInBBoxQuery.class));
-        XGeoPointInBBoxQuery filter = (XGeoPointInBBoxQuery) booleanClause.getQuery();
+        assertThat(booleanClause.getQuery(), instanceOf(GeoPointInBBoxQuery.class));
+        GeoPointInBBoxQuery filter = (GeoPointInBBoxQuery) booleanClause.getQuery();
         assertThat(filter.getField(), equalTo("location"));
         assertThat(filter.getMaxLat(), closeTo(40, 0.00001));
         assertThat(filter.getMinLon(), closeTo(-70, 0.00001));
@@ -2264,8 +2248,8 @@ public class SimpleIndexQueryParserTests extends ESSingleNodeTestCase {
         assertThat(booleanClause.getQuery(), instanceOf(MatchAllDocsQuery.class));
         booleanClause = booleanQuery.clauses().get(1);
         assertThat(booleanClause.getOccur(), equalTo(Occur.FILTER));
-        assertThat(booleanClause.getQuery(), instanceOf(XGeoPointInPolygonQuery.class));
-        XGeoPointInPolygonQuery filter = (XGeoPointInPolygonQuery) booleanClause.getQuery();
+        assertThat(booleanClause.getQuery(), instanceOf(GeoPointInPolygonQuery.class));
+        GeoPointInPolygonQuery filter = (GeoPointInPolygonQuery) booleanClause.getQuery();
         assertThat(filter.getField(), equalTo("location"));
         assertThat(filter.getLats().length, equalTo(4));
         assertThat(filter.getLons().length, equalTo(4));
@@ -2313,8 +2297,8 @@ public class SimpleIndexQueryParserTests extends ESSingleNodeTestCase {
         assertThat(booleanClause.getQuery(), instanceOf(MatchAllDocsQuery.class));
         booleanClause = booleanQuery.clauses().get(1);
         assertThat(booleanClause.getOccur(), equalTo(Occur.FILTER));
-        assertThat(booleanClause.getQuery(), instanceOf(XGeoPointInPolygonQuery.class));
-        XGeoPointInPolygonQuery filter = (XGeoPointInPolygonQuery) booleanClause.getQuery();
+        assertThat(booleanClause.getQuery(), instanceOf(GeoPointInPolygonQuery.class));
+        GeoPointInPolygonQuery filter = (GeoPointInPolygonQuery) booleanClause.getQuery();
         assertThat(filter.getField(), equalTo("location"));
         assertThat(filter.getLats().length, equalTo(4));
         assertThat(filter.getLons().length, equalTo(4));
@@ -2339,8 +2323,8 @@ public class SimpleIndexQueryParserTests extends ESSingleNodeTestCase {
         assertThat(booleanClause.getQuery(), instanceOf(MatchAllDocsQuery.class));
         booleanClause = booleanQuery.clauses().get(1);
         assertThat(booleanClause.getOccur(), equalTo(Occur.FILTER));
-        assertThat(booleanClause.getQuery(), instanceOf(XGeoPointInPolygonQuery.class));
-        XGeoPointInPolygonQuery filter = (XGeoPointInPolygonQuery) booleanClause.getQuery();
+        assertThat(booleanClause.getQuery(), instanceOf(GeoPointInPolygonQuery.class));
+        GeoPointInPolygonQuery filter = (GeoPointInPolygonQuery) booleanClause.getQuery();
         assertThat(filter.getField(), equalTo("location"));
         assertThat(filter.getLats().length, equalTo(4));
         assertThat(filter.getLons().length, equalTo(4));
@@ -2365,8 +2349,8 @@ public class SimpleIndexQueryParserTests extends ESSingleNodeTestCase {
         assertThat(booleanClause.getQuery(), instanceOf(MatchAllDocsQuery.class));
         booleanClause = booleanQuery.clauses().get(1);
         assertThat(booleanClause.getOccur(), equalTo(Occur.FILTER));
-        assertThat(booleanClause.getQuery(), instanceOf(XGeoPointInPolygonQuery.class));
-        XGeoPointInPolygonQuery filter = (XGeoPointInPolygonQuery) booleanClause.getQuery();
+        assertThat(booleanClause.getQuery(), instanceOf(GeoPointInPolygonQuery.class));
+        GeoPointInPolygonQuery filter = (GeoPointInPolygonQuery) booleanClause.getQuery();
         assertThat(filter.getField(), equalTo("location"));
         assertThat(filter.getLats().length, equalTo(4));
         assertThat(filter.getLons().length, equalTo(4));
@@ -2391,8 +2375,8 @@ public class SimpleIndexQueryParserTests extends ESSingleNodeTestCase {
         assertThat(booleanClause.getQuery(), instanceOf(MatchAllDocsQuery.class));
         booleanClause = booleanQuery.clauses().get(1);
         assertThat(booleanClause.getOccur(), equalTo(Occur.FILTER));
-        assertThat(booleanClause.getQuery(), instanceOf(XGeoPointInPolygonQuery.class));
-        XGeoPointInPolygonQuery filter = (XGeoPointInPolygonQuery) booleanClause.getQuery();
+        assertThat(booleanClause.getQuery(), instanceOf(GeoPointInPolygonQuery.class));
+        GeoPointInPolygonQuery filter = (GeoPointInPolygonQuery) booleanClause.getQuery();
         assertThat(filter.getField(), equalTo("location"));
         assertThat(filter.getLats().length, equalTo(4));
         assertThat(filter.getLons().length, equalTo(4));

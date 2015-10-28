@@ -21,7 +21,7 @@ package org.elasticsearch.messy.tests;
 
 
 import org.apache.lucene.util.BytesRef;
-import org.apache.lucene.util.XGeoUtils;
+import org.apache.lucene.util.GeoUtils;
 import org.apache.lucene.util.LuceneTestCase;
 import org.apache.lucene.util.TestUtil;
 import org.apache.lucene.util.UnicodeUtil;
@@ -835,7 +835,7 @@ public class SimpleSortTests extends ESIntegTestCase {
         assertThat(searchResponse.getHits().getTotalHits(), equalTo(20l));
         for (int i = 0; i < 10; i++) {
             assertThat("res: " + i + " id: " + searchResponse.getHits().getAt(i).getId(), (Double) searchResponse.getHits().getAt(i)
-                    .field("min").value(), closeTo((double) i, XGeoUtils.TOLERANCE));
+                    .field("min").value(), closeTo((double) i, GeoUtils.TOLERANCE));
         }
     }
 
