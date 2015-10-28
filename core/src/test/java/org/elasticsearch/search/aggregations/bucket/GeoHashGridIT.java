@@ -20,8 +20,6 @@ package org.elasticsearch.search.aggregations.bucket;
 
 import com.carrotsearch.hppc.ObjectIntHashMap;
 import com.carrotsearch.hppc.ObjectIntMap;
-import com.carrotsearch.hppc.ObjectObjectHashMap;
-import com.carrotsearch.hppc.ObjectObjectMap;
 import com.carrotsearch.hppc.cursors.ObjectIntCursor;
 
 import org.apache.lucene.util.GeoHashUtils;
