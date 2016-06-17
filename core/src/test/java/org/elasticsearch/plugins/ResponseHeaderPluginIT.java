@@ -35,11 +35,11 @@ import static org.hamcrest.Matchers.equalTo;
 /**
  * Test a rest action that sets special response headers
  */
-@ClusterScope(scope = Scope.SUITE, numDataNodes = 1)
+@ClusterScope(scope = Scope.SUITE, supportsDedicatedMasters = false, numDataNodes = 1)
 public class ResponseHeaderPluginIT extends ESIntegTestCase {
     @Override
     protected Settings nodeSettings(int nodeOrdinal) {
-        return Settings.settingsBuilder()
+        return Settings.builder()
                 .put(super.nodeSettings(nodeOrdinal))
                 .put("force.http.enabled", true)
                 .build();

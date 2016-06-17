@@ -23,12 +23,12 @@ import org.elasticsearch.ElasticsearchException;
 import org.elasticsearch.action.admin.indices.mapping.get.GetFieldMappingsResponse.FieldMappingMetaData;
 import org.elasticsearch.action.support.ActionFilters;
 import org.elasticsearch.action.support.single.shard.TransportSingleShardAction;
-import org.elasticsearch.cluster.ClusterService;
 import org.elasticsearch.cluster.ClusterState;
 import org.elasticsearch.cluster.block.ClusterBlockException;
 import org.elasticsearch.cluster.block.ClusterBlockLevel;
 import org.elasticsearch.cluster.metadata.IndexNameExpressionResolver;
 import org.elasticsearch.cluster.routing.ShardsIterator;
+import org.elasticsearch.cluster.service.ClusterService;
 import org.elasticsearch.common.collect.MapBuilder;
 import org.elasticsearch.common.inject.Inject;
 import org.elasticsearch.common.regex.Regex;
@@ -102,7 +102,7 @@ public class TransportGetFieldMappingsIndexAction extends TransportSingleShardAc
                     .filter(type -> Regex.simpleMatch(request.types(), type))
                     .collect(Collectors.toCollection(ArrayList::new));
             if (typeIntersection.isEmpty()) {
-                throw new TypeMissingException(shardId.index(), request.types());
+                throw new TypeMissingException(shardId.getIndex(), request.types());
             }
         }
 
@@ -115,7 +115,7 @@ public class TransportGetFieldMappingsIndexAction extends TransportSingleShardAc
             }
         }
 
-        return new GetFieldMappingsResponse(singletonMap(shardId.getIndex(), typeMappings.immutableMap()));
+        return new GetFieldMappingsResponse(singletonMap(shardId.getIndexName(), typeMappings.immutableMap()));
     }
 
     @Override

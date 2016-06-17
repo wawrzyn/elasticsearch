@@ -43,7 +43,7 @@ public class RestClusterUpdateSettingsAction extends BaseRestHandler {
 
     @Inject
     public RestClusterUpdateSettingsAction(Settings settings, RestController controller, Client client) {
-        super(settings, controller, client);
+        super(settings, client);
         controller.registerHandler(RestRequest.Method.PUT, "/_cluster/settings", this);
     }
 
@@ -75,5 +75,10 @@ public class RestClusterUpdateSettingsAction extends BaseRestHandler {
                 builder.endObject();
             }
         });
+    }
+
+    @Override
+    public boolean canTripCircuitBreaker() {
+        return false;
     }
 }

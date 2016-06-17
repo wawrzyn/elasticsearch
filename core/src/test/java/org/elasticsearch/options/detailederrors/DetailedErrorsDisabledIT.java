@@ -20,10 +20,10 @@
 package org.elasticsearch.options.detailederrors;
 
 import org.apache.http.impl.client.HttpClients;
+import org.elasticsearch.common.network.NetworkModule;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.http.HttpServerTransport;
-import org.elasticsearch.http.netty.NettyHttpServerTransport;
-import org.elasticsearch.node.Node;
+import org.elasticsearch.http.HttpTransportSettings;
 import org.elasticsearch.test.ESIntegTestCase;
 import org.elasticsearch.test.ESIntegTestCase.ClusterScope;
 import org.elasticsearch.test.ESIntegTestCase.Scope;
@@ -36,15 +36,15 @@ import static org.hamcrest.Matchers.is;
 /**
  * Tests that when disabling detailed errors, a request with the error_trace parameter returns a HTTP 400
  */
-@ClusterScope(scope = Scope.TEST, numDataNodes = 1)
+@ClusterScope(scope = Scope.TEST, supportsDedicatedMasters = false, numDataNodes = 1)
 public class DetailedErrorsDisabledIT extends ESIntegTestCase {
     // Build our cluster settings
     @Override
     protected Settings nodeSettings(int nodeOrdinal) {
-        return Settings.settingsBuilder()
+        return Settings.builder()
                 .put(super.nodeSettings(nodeOrdinal))
-                .put(Node.HTTP_ENABLED, true)
-                .put(NettyHttpServerTransport.SETTING_HTTP_DETAILED_ERRORS_ENABLED, false)
+                .put(NetworkModule.HTTP_ENABLED.getKey(), true)
+                .put(HttpTransportSettings.SETTING_HTTP_DETAILED_ERRORS_ENABLED.getKey(), false)
                 .build();
     }
 

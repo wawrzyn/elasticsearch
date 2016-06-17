@@ -80,7 +80,7 @@ public final class CorruptionUtils {
             long checksumAfterCorruption;
             long actualChecksumAfterCorruption;
             try (ChecksumIndexInput input = dir.openChecksumInput(fileToCorrupt.getFileName().toString(), IOContext.DEFAULT)) {
-                assertThat(input.getFilePointer(), is(0l));
+                assertThat(input.getFilePointer(), is(0L));
                 input.seek(input.length() - 8); // one long is the checksum... 8 bytes
                 checksumAfterCorruption = input.getChecksum();
                 actualChecksumAfterCorruption = input.readLong();
@@ -88,11 +88,11 @@ public final class CorruptionUtils {
             // we need to add assumptions here that the checksums actually really don't match there is a small chance to get collisions
             // in the checksum which is ok though....
             StringBuilder msg = new StringBuilder();
-            msg.append("Checksum before: [").append(checksumBeforeCorruption).append("]");
-            msg.append(" after: [").append(checksumAfterCorruption).append("]");
-            msg.append(" checksum value after corruption: ").append(actualChecksumAfterCorruption).append("]");
-            msg.append(" file: ").append(fileToCorrupt.getFileName()).append(" length: ").append(dir.fileLength(fileToCorrupt.getFileName().toString()));
-            logger.info(msg.toString());
+            msg.append("before: [").append(checksumBeforeCorruption).append("] ");
+            msg.append("after: [").append(checksumAfterCorruption).append("] ");
+            msg.append("checksum value after corruption: ").append(actualChecksumAfterCorruption).append("] ");
+            msg.append("file: ").append(fileToCorrupt.getFileName()).append(" length: ").append(dir.fileLength(fileToCorrupt.getFileName().toString()));
+            logger.info("Checksum {}", msg);
             assumeTrue("Checksum collision - " + msg.toString(),
                     checksumAfterCorruption != checksumBeforeCorruption // collision
                             || actualChecksumAfterCorruption != checksumBeforeCorruption); // checksum corrupted

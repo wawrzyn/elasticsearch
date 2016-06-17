@@ -29,6 +29,7 @@ import org.elasticsearch.test.ESIntegTestCase;
 
 import java.util.Locale;
 
+import static org.elasticsearch.action.support.WriteRequest.RefreshPolicy.IMMEDIATE;
 import static org.elasticsearch.common.xcontent.XContentFactory.jsonBuilder;
 import static org.elasticsearch.test.hamcrest.ElasticsearchAssertions.assertAcked;
 import static org.hamcrest.Matchers.equalTo;
@@ -48,7 +49,7 @@ public class SimpleTimestampIT extends ESIntegTestCase {
 
         logger.info("--> check with automatic timestamp");
         long now1 = System.currentTimeMillis();
-        client().prepareIndex("test", "type1", "1").setSource("field1", "value1").setRefresh(true).execute().actionGet();
+        client().prepareIndex("test", "type1", "1").setSource("field1", "value1").setRefreshPolicy(IMMEDIATE).get();
         long now2 = System.currentTimeMillis();
 
         // we check both realtime get and non realtime get
@@ -70,21 +71,22 @@ public class SimpleTimestampIT extends ESIntegTestCase {
         assertThat(((Number) getResponse.getField("_timestamp").getValue()).longValue(), equalTo(timestamp));
 
         logger.info("--> check with custom timestamp (numeric)");
-        client().prepareIndex("test", "type1", "1").setSource("field1", "value1").setTimestamp("10").setRefresh(true).execute().actionGet();
+        client().prepareIndex("test", "type1", "1").setSource("field1", "value1").setTimestamp("10").setRefreshPolicy(IMMEDIATE).get();
 
         getResponse = client().prepareGet("test", "type1", "1").setFields("_timestamp").setRealtime(false).execute().actionGet();
         timestamp = ((Number) getResponse.getField("_timestamp").getValue()).longValue();
-        assertThat(timestamp, equalTo(10l));
+        assertThat(timestamp, equalTo(10L));
         // verify its the same timestamp when going the replica
         getResponse = client().prepareGet("test", "type1", "1").setFields("_timestamp").setRealtime(false).execute().actionGet();
         assertThat(((Number) getResponse.getField("_timestamp").getValue()).longValue(), equalTo(timestamp));
 
         logger.info("--> check with custom timestamp (string)");
-        client().prepareIndex("test", "type1", "1").setSource("field1", "value1").setTimestamp("1970-01-01T00:00:00.020").setRefresh(true).execute().actionGet();
+        client().prepareIndex("test", "type1", "1").setSource("field1", "value1").setTimestamp("1970-01-01T00:00:00.020")
+                .setRefreshPolicy(IMMEDIATE).get();
 
         getResponse = client().prepareGet("test", "type1", "1").setFields("_timestamp").setRealtime(false).execute().actionGet();
         timestamp = ((Number) getResponse.getField("_timestamp").getValue()).longValue();
-        assertThat(timestamp, equalTo(20l));
+        assertThat(timestamp, equalTo(20L));
         // verify its the same timestamp when going the replica
         getResponse = client().prepareGet("test", "type1", "1").setFields("_timestamp").setRealtime(false).execute().actionGet();
         assertThat(((Number) getResponse.getField("_timestamp").getValue()).longValue(), equalTo(timestamp));
@@ -102,7 +104,7 @@ public class SimpleTimestampIT extends ESIntegTestCase {
         assertTimestampMappingEnabled(index, type, true);
 
         // update some field in the mapping
-        XContentBuilder updateMappingBuilder = jsonBuilder().startObject().startObject("properties").startObject("otherField").field("type", "string").endObject().endObject();
+        XContentBuilder updateMappingBuilder = jsonBuilder().startObject().startObject("properties").startObject("otherField").field("type", "text").endObject().endObject().endObject();
         PutMappingResponse putMappingResponse = client().admin().indices().preparePutMapping(index).setType(type).setSource(updateMappingBuilder).get();
         assertAcked(putMappingResponse);
 

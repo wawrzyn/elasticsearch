@@ -19,10 +19,11 @@
 
 package org.elasticsearch.common.geo.builders;
 
-import com.spatial4j.core.shape.Shape;
+import org.locationtech.spatial4j.shape.Shape;
 import com.vividsolutions.jts.geom.Coordinate;
 import com.vividsolutions.jts.geom.Geometry;
 import com.vividsolutions.jts.geom.LineString;
+
 import org.elasticsearch.common.io.stream.StreamInput;
 import org.elasticsearch.common.io.stream.StreamOutput;
 import org.elasticsearch.common.xcontent.XContentBuilder;
@@ -36,17 +37,32 @@ public class MultiLineStringBuilder extends ShapeBuilder {
 
     public static final GeoShapeType TYPE = GeoShapeType.MULTILINESTRING;
 
-    public static final MultiLineStringBuilder PROTOTYPE = new MultiLineStringBuilder();
-
     private final ArrayList<LineStringBuilder> lines = new ArrayList<>();
+
+    public MultiLineStringBuilder() {
+    }
+
+    /**
+     * Read from a stream.
+     */
+    public MultiLineStringBuilder(StreamInput in) throws IOException {
+        int size = in.readVInt();
+        for (int i = 0; i < size; i++) {
+            linestring(new LineStringBuilder(in));
+        }
+    }
+
+    @Override
+    public void writeTo(StreamOutput out) throws IOException {
+        out.writeVInt(lines.size());
+        for (LineStringBuilder line : lines) {
+            line.writeTo(out);
+        }
+    }
 
     public MultiLineStringBuilder linestring(LineStringBuilder line) {
         this.lines.add(line);
         return this;
-    }
-
-    public MultiLineStringBuilder linestring(Coordinate[] coordinates) {
-        return this.linestring(new LineStringBuilder().points(coordinates));
     }
 
     public Coordinate[][] coordinates() {
@@ -116,23 +132,5 @@ public class MultiLineStringBuilder extends ShapeBuilder {
         }
         MultiLineStringBuilder other = (MultiLineStringBuilder) obj;
         return Objects.equals(lines, other.lines);
-    }
-
-    @Override
-    public void writeTo(StreamOutput out) throws IOException {
-        out.writeVInt(lines.size());
-        for (LineStringBuilder line : lines) {
-            line.writeTo(out);
-        }
-    }
-
-    @Override
-    public MultiLineStringBuilder readFrom(StreamInput in) throws IOException {
-        MultiLineStringBuilder multiLineStringBuilder = new MultiLineStringBuilder();
-        int size = in.readVInt();
-        for (int i = 0; i < size; i++) {
-            multiLineStringBuilder.linestring(LineStringBuilder.PROTOTYPE.readFrom(in));
-        }
-        return multiLineStringBuilder;
     }
 }

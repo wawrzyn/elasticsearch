@@ -48,7 +48,7 @@ public class RestUpdateAction extends BaseRestHandler {
 
     @Inject
     public RestUpdateAction(Settings settings, RestController controller, Client client) {
-        super(settings, controller, client);
+        super(settings, client);
         controller.registerHandler(POST, "/{index}/{type}/{id}/_update", this);
     }
 
@@ -58,7 +58,7 @@ public class RestUpdateAction extends BaseRestHandler {
         updateRequest.routing(request.param("routing"));
         updateRequest.parent(request.param("parent"));
         updateRequest.timeout(request.paramAsTime("timeout", updateRequest.timeout()));
-        updateRequest.refresh(request.paramAsBoolean("refresh", updateRequest.refresh()));
+        updateRequest.setRefreshPolicy(request.param("refresh"));
         String consistencyLevel = request.param("consistency");
         if (consistencyLevel != null) {
             updateRequest.consistencyLevel(WriteConsistencyLevel.fromString(consistencyLevel));

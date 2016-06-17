@@ -30,7 +30,6 @@ import org.elasticsearch.common.Strings;
 import org.elasticsearch.common.inject.Inject;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.xcontent.XContentBuilder;
-import org.elasticsearch.common.xcontent.XContentBuilderString;
 import org.elasticsearch.rest.BaseRestHandler;
 import org.elasticsearch.rest.BytesRestResponse;
 import org.elasticsearch.rest.RestChannel;
@@ -58,7 +57,7 @@ public class RestBulkAction extends BaseRestHandler {
 
     @Inject
     public RestBulkAction(Settings settings, RestController controller, Client client) {
-        super(settings, controller, client);
+        super(settings, client);
 
         controller.registerHandler(POST, "/_bulk", this);
         controller.registerHandler(PUT, "/_bulk", this);
@@ -67,7 +66,7 @@ public class RestBulkAction extends BaseRestHandler {
         controller.registerHandler(POST, "/{index}/{type}/_bulk", this);
         controller.registerHandler(PUT, "/{index}/{type}/_bulk", this);
 
-        this.allowExplicitIndex = settings.getAsBoolean("rest.action.multi.allow_explicit_index", true);
+        this.allowExplicitIndex = MULTI_ALLOW_EXPLICIT_INDEX.get(settings);
     }
 
     @Override
@@ -77,6 +76,7 @@ public class RestBulkAction extends BaseRestHandler {
         String defaultType = request.param("type");
         String defaultRouting = request.param("routing");
         String fieldsParam = request.param("fields");
+        String defaultPipeline = request.param("pipeline");
         String[] defaultFields = fieldsParam != null ? Strings.commaDelimitedListToStringArray(fieldsParam) : null;
 
         String consistencyLevel = request.param("consistency");
@@ -84,14 +84,17 @@ public class RestBulkAction extends BaseRestHandler {
             bulkRequest.consistencyLevel(WriteConsistencyLevel.fromString(consistencyLevel));
         }
         bulkRequest.timeout(request.paramAsTime("timeout", BulkShardRequest.DEFAULT_TIMEOUT));
-        bulkRequest.refresh(request.paramAsBoolean("refresh", bulkRequest.refresh()));
-        bulkRequest.add(request.content(), defaultIndex, defaultType, defaultRouting, defaultFields, null, allowExplicitIndex);
+        bulkRequest.setRefreshPolicy(request.param("refresh"));
+        bulkRequest.add(request.content(), defaultIndex, defaultType, defaultRouting, defaultFields, defaultPipeline, null, allowExplicitIndex);
 
         client.bulk(bulkRequest, new RestBuilderListener<BulkResponse>(channel) {
             @Override
             public RestResponse buildResponse(BulkResponse response, XContentBuilder builder) throws Exception {
                 builder.startObject();
                 builder.field(Fields.TOOK, response.getTookInMillis());
+                if (response.getIngestTookInMillis() != BulkResponse.NO_INGEST_TOOK) {
+                    builder.field(Fields.INGEST_TOOK, response.getIngestTookInMillis());
+                }
                 builder.field(Fields.ERRORS, response.hasFailures());
                 builder.startArray(Fields.ITEMS);
                 for (BulkItemResponse itemResponse : response) {
@@ -108,9 +111,10 @@ public class RestBulkAction extends BaseRestHandler {
     }
 
     static final class Fields {
-        static final XContentBuilderString ITEMS = new XContentBuilderString("items");
-        static final XContentBuilderString ERRORS = new XContentBuilderString("errors");
-        static final XContentBuilderString TOOK = new XContentBuilderString("took");
+        static final String ITEMS = "items";
+        static final String ERRORS = "errors";
+        static final String TOOK = "took";
+        static final String INGEST_TOOK = "ingest_took";
     }
 
 }

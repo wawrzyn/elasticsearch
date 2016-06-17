@@ -34,6 +34,7 @@ import org.elasticsearch.cluster.node.DiscoveryNode;
 import org.elasticsearch.cluster.routing.RoutingNodes;
 import org.elasticsearch.cluster.routing.ShardRouting;
 import org.elasticsearch.cluster.routing.allocation.decider.EnableAllocationDecider;
+import org.elasticsearch.cluster.service.ClusterService;
 import org.elasticsearch.common.Strings;
 import org.elasticsearch.common.collect.ImmutableOpenMap;
 import org.elasticsearch.common.inject.Inject;
@@ -61,7 +62,6 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 import static java.util.Collections.emptySet;
 import static java.util.Collections.unmodifiableSet;
-import static org.elasticsearch.common.settings.Settings.settingsBuilder;
 import static org.elasticsearch.common.util.set.Sets.newHashSet;
 import static org.elasticsearch.test.hamcrest.ElasticsearchAssertions.assertAcked;
 import static org.hamcrest.CoreMatchers.equalTo;
@@ -75,16 +75,6 @@ import static org.hamcrest.Matchers.greaterThanOrEqualTo;
 public class ClusterInfoServiceIT extends ESIntegTestCase {
 
     public static class TestPlugin extends Plugin {
-
-        @Override
-        public String name() {
-            return "ClusterInfoServiceIT";
-        }
-
-        @Override
-        public String description() {
-            return "ClusterInfoServiceIT";
-        }
 
         public void onModule(ActionModule module) {
             module.registerFilter(BlockingActionFilter.class);
@@ -100,7 +90,7 @@ public class ClusterInfoServiceIT extends ESIntegTestCase {
         }
 
         @Override
-        protected boolean apply(String action, ActionRequest request, ActionListener listener) {
+        protected boolean apply(String action, ActionRequest<?> request, ActionListener<?> listener) {
             if (blockedActions.contains(action)) {
                 throw new ElasticsearchException("force exception on [" + action + "]");
             }
@@ -108,7 +98,7 @@ public class ClusterInfoServiceIT extends ESIntegTestCase {
         }
 
         @Override
-        protected boolean apply(String action, ActionResponse response, ActionListener listener) {
+        protected boolean apply(String action, ActionResponse response, ActionListener<?> listener) {
             return true;
         }
 
@@ -138,9 +128,9 @@ public class ClusterInfoServiceIT extends ESIntegTestCase {
 
     public void testClusterInfoServiceCollectsInformation() throws Exception {
         internalCluster().startNodesAsync(2).get();
-        assertAcked(prepareCreate("test").setSettings(settingsBuilder()
-                .put(Store.INDEX_STORE_STATS_REFRESH_INTERVAL, 0)
-                .put(EnableAllocationDecider.INDEX_ROUTING_REBALANCE_ENABLE, EnableAllocationDecider.Rebalance.NONE).build()));
+        assertAcked(prepareCreate("test").setSettings(Settings.builder()
+                .put(Store.INDEX_STORE_STATS_REFRESH_INTERVAL_SETTING.getKey(), 0)
+                .put(EnableAllocationDecider.INDEX_ROUTING_REBALANCE_ENABLE_SETTING.getKey(), EnableAllocationDecider.Rebalance.NONE).build()));
         ensureGreen("test");
         InternalTestCluster internalTestCluster = internalCluster();
         // Get the cluster info service on the master node
@@ -170,8 +160,7 @@ public class ClusterInfoServiceIT extends ESIntegTestCase {
         }
         ClusterService clusterService = internalTestCluster.getInstance(ClusterService.class, internalTestCluster.getMasterName());
         ClusterState state = clusterService.state();
-        RoutingNodes routingNodes = state.getRoutingNodes();
-        for (ShardRouting shard : routingNodes.getRoutingTable().allShards()) {
+        for (ShardRouting shard : state.routingTable().allShards()) {
             String dataPath = info.getDataPath(shard);
             assertNotNull(dataPath);
 

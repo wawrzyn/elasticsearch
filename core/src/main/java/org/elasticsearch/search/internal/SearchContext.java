@@ -20,13 +20,10 @@ package org.elasticsearch.search.internal;
 
 
 import org.apache.lucene.search.Collector;
+import org.apache.lucene.search.FieldDoc;
 import org.apache.lucene.search.Query;
-import org.apache.lucene.search.Sort;
 import org.apache.lucene.util.Counter;
 import org.elasticsearch.action.search.SearchType;
-import org.elasticsearch.cache.recycler.PageCacheRecycler;
-import org.elasticsearch.common.DelegatingHasContextAndHeaders;
-import org.elasticsearch.common.HasContextAndHeaders;
 import org.elasticsearch.common.Nullable;
 import org.elasticsearch.common.ParseFieldMatcher;
 import org.elasticsearch.common.lease.Releasable;
@@ -47,6 +44,7 @@ import org.elasticsearch.script.ScriptService;
 import org.elasticsearch.search.SearchShardTarget;
 import org.elasticsearch.search.aggregations.SearchContextAggregations;
 import org.elasticsearch.search.dfs.DfsSearchResult;
+import org.elasticsearch.search.fetch.FetchPhase;
 import org.elasticsearch.search.fetch.FetchSearchResult;
 import org.elasticsearch.search.fetch.FetchSubPhase;
 import org.elasticsearch.search.fetch.FetchSubPhaseContext;
@@ -58,27 +56,27 @@ import org.elasticsearch.search.lookup.SearchLookup;
 import org.elasticsearch.search.profile.Profilers;
 import org.elasticsearch.search.query.QuerySearchResult;
 import org.elasticsearch.search.rescore.RescoreSearchContext;
+import org.elasticsearch.search.sort.SortAndFormats;
 import org.elasticsearch.search.suggest.SuggestionSearchContext;
 
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.Callable;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-public abstract class SearchContext extends DelegatingHasContextAndHeaders implements Releasable {
+public abstract class SearchContext implements Releasable {
 
     private static ThreadLocal<SearchContext> current = new ThreadLocal<>();
     public final static int DEFAULT_TERMINATE_AFTER = 0;
 
     public static void setCurrent(SearchContext value) {
         current.set(value);
-        QueryShardContext.setTypes(value.types());
     }
 
     public static void removeCurrent() {
         current.remove();
-        QueryShardContext.removeTypes();
     }
 
     public static SearchContext current() {
@@ -87,11 +85,11 @@ public abstract class SearchContext extends DelegatingHasContextAndHeaders imple
 
     private Map<Lifetime, List<Releasable>> clearables = null;
     private final AtomicBoolean closed = new AtomicBoolean(false);
+    private InnerHitsContext innerHitsContext;
 
     protected final ParseFieldMatcher parseFieldMatcher;
 
-    protected SearchContext(ParseFieldMatcher parseFieldMatcher, HasContextAndHeaders contextHeaders) {
-        super(contextHeaders);
+    protected SearchContext(ParseFieldMatcher parseFieldMatcher) {
         this.parseFieldMatcher = parseFieldMatcher;
     }
 
@@ -129,15 +127,9 @@ public abstract class SearchContext extends DelegatingHasContextAndHeaders imple
 
     public abstract SearchType searchType();
 
-    public abstract SearchContext searchType(SearchType searchType);
-
     public abstract SearchShardTarget shardTarget();
 
     public abstract int numberOfShards();
-
-    public abstract boolean hasTypes();
-
-    public abstract String[] types();
 
     public abstract float queryBoost();
 
@@ -150,8 +142,21 @@ public abstract class SearchContext extends DelegatingHasContextAndHeaders imple
         return nowInMillisImpl();
     }
 
+    public final Callable<Long> nowCallable() {
+        return new Callable<Long>() {
+            @Override
+            public Long call() throws Exception {
+                return nowInMillis();
+            }
+        };
+    };
+
     public final boolean nowInMillisUsed() {
         return nowInMillisUsed;
+    }
+
+    public final void resetNowInMillisUsed() {
+        this.nowInMillisUsed = false;
     }
 
     protected abstract long nowInMillisImpl();
@@ -170,9 +175,12 @@ public abstract class SearchContext extends DelegatingHasContextAndHeaders imple
 
     public abstract void highlight(SearchContextHighlight highlight);
 
-    public abstract void innerHits(InnerHitsContext innerHitsContext);
-
-    public abstract InnerHitsContext innerHits();
+    public InnerHitsContext innerHits() {
+        if (innerHitsContext == null) {
+            innerHitsContext = new InnerHitsContext();
+        }
+        return innerHitsContext;
+    }
 
     public abstract SuggestionSearchContext suggest();
 
@@ -212,8 +220,6 @@ public abstract class SearchContext extends DelegatingHasContextAndHeaders imple
 
     public abstract ScriptService scriptService();
 
-    public abstract PageCacheRecycler pageCacheRecycler();
-
     public abstract BigArrays bigArrays();
 
     public abstract BitsetFilterCache bitsetFilterCache();
@@ -232,13 +238,17 @@ public abstract class SearchContext extends DelegatingHasContextAndHeaders imple
 
     public abstract Float minimumScore();
 
-    public abstract SearchContext sort(Sort sort);
+    public abstract SearchContext sort(SortAndFormats sort);
 
-    public abstract Sort sort();
+    public abstract SortAndFormats sort();
 
     public abstract SearchContext trackScores(boolean trackScores);
 
     public abstract boolean trackScores();
+
+    public abstract SearchContext searchAfter(FieldDoc searchAfter);
+
+    public abstract FieldDoc searchAfter();
 
     public abstract SearchContext parsedPostFilter(ParsedQuery postFilter);
 
@@ -304,6 +314,8 @@ public abstract class SearchContext extends DelegatingHasContextAndHeaders imple
 
     public abstract QuerySearchResult queryResult();
 
+    public abstract FetchPhase fetchPhase();
+
     public abstract FetchSearchResult fetchResult();
 
     /**
@@ -344,6 +356,14 @@ public abstract class SearchContext extends DelegatingHasContextAndHeaders imple
     }
 
     /**
+     * @return true if the request contains only suggest
+     */
+    public final boolean hasOnlySuggest() {
+        return request().source() != null
+            && request().source().isSuggestOnly();
+    }
+
+    /**
      * Looks up the given field, but does not restrict to fields in the types set on this context.
      */
     public abstract MappedFieldType smartNameFieldType(String name);
@@ -373,4 +393,18 @@ public abstract class SearchContext extends DelegatingHasContextAndHeaders imple
         CONTEXT
     }
 
+    public abstract QueryShardContext getQueryShardContext();
+
+    @Override
+    public String toString() {
+        StringBuilder result = new StringBuilder().append(shardTarget());
+        if (searchType() != SearchType.DEFAULT) {
+            result.append("searchType=[").append(searchType()).append("]");
+        }
+        if (scrollContext() != null) {
+            result.append("scroll=[").append(scrollContext().scroll.keepAlive()).append("]");
+        }
+        result.append(" query=[").append(query()).append("]");
+        return result.toString();
+    }
 }

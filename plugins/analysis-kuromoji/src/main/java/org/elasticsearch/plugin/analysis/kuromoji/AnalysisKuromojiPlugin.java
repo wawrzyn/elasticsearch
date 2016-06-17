@@ -24,6 +24,7 @@ import org.elasticsearch.index.analysis.KuromojiAnalyzerProvider;
 import org.elasticsearch.index.analysis.KuromojiBaseFormFilterFactory;
 import org.elasticsearch.index.analysis.KuromojiIterationMarkCharFilterFactory;
 import org.elasticsearch.index.analysis.KuromojiKatakanaStemmerFactory;
+import org.elasticsearch.index.analysis.KuromojiNumberFilterFactory;
 import org.elasticsearch.index.analysis.KuromojiPartOfSpeechFilterFactory;
 import org.elasticsearch.index.analysis.KuromojiReadingFormFilterFactory;
 import org.elasticsearch.index.analysis.KuromojiTokenizerFactory;
@@ -35,17 +36,6 @@ import org.elasticsearch.plugins.Plugin;
  */
 public class AnalysisKuromojiPlugin extends Plugin {
 
-    @Override
-    public String name() {
-        return "analysis-kuromoji";
-    }
-
-    @Override
-    public String description() {
-        return "Kuromoji analysis support";
-    }
-
-
     public void onModule(AnalysisModule module) {
         module.registerCharFilter("kuromoji_iteration_mark", KuromojiIterationMarkCharFilterFactory::new);
         module.registerAnalyzer("kuromoji", KuromojiAnalyzerProvider::new);
@@ -55,5 +45,6 @@ public class AnalysisKuromojiPlugin extends Plugin {
         module.registerTokenFilter("kuromoji_readingform", KuromojiReadingFormFilterFactory::new);
         module.registerTokenFilter("kuromoji_stemmer", KuromojiKatakanaStemmerFactory::new);
         module.registerTokenFilter("ja_stop", JapaneseStopTokenFilterFactory::new);
+        module.registerTokenFilter("kuromoji_number", KuromojiNumberFilterFactory::new);
     }
 }

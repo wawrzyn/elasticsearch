@@ -31,7 +31,7 @@ import java.io.IOException;
 /**
  *
  */
-public abstract class BaseNodesRequest<T extends BaseNodesRequest> extends ActionRequest<T> {
+public abstract class BaseNodesRequest<Request extends BaseNodesRequest<Request>> extends ActionRequest<Request> {
 
     public static String[] ALL_NODES = Strings.EMPTY_ARRAY;
 
@@ -43,11 +43,6 @@ public abstract class BaseNodesRequest<T extends BaseNodesRequest> extends Actio
 
     }
 
-    protected BaseNodesRequest(ActionRequest request, String... nodesIds) {
-        super(request);
-        this.nodesIds = nodesIds;
-    }
-
     protected BaseNodesRequest(String... nodesIds) {
         this.nodesIds = nodesIds;
     }
@@ -57,9 +52,9 @@ public abstract class BaseNodesRequest<T extends BaseNodesRequest> extends Actio
     }
 
     @SuppressWarnings("unchecked")
-    public final T nodesIds(String... nodesIds) {
+    public final Request nodesIds(String... nodesIds) {
         this.nodesIds = nodesIds;
-        return (T) this;
+        return (Request) this;
     }
 
     public TimeValue timeout() {
@@ -67,15 +62,15 @@ public abstract class BaseNodesRequest<T extends BaseNodesRequest> extends Actio
     }
 
     @SuppressWarnings("unchecked")
-    public final T timeout(TimeValue timeout) {
+    public final Request timeout(TimeValue timeout) {
         this.timeout = timeout;
-        return (T) this;
+        return (Request) this;
     }
 
     @SuppressWarnings("unchecked")
-    public final T timeout(String timeout) {
+    public final Request timeout(String timeout) {
         this.timeout = TimeValue.parseTimeValue(timeout, null, getClass().getSimpleName() + ".timeout");
-        return (T) this;
+        return (Request) this;
     }
 
     @Override
@@ -87,20 +82,13 @@ public abstract class BaseNodesRequest<T extends BaseNodesRequest> extends Actio
     public void readFrom(StreamInput in) throws IOException {
         super.readFrom(in);
         nodesIds = in.readStringArray();
-        if (in.readBoolean()) {
-            timeout = TimeValue.readTimeValue(in);
-        }
+        timeout = in.readOptionalWriteable(TimeValue::new);
     }
 
     @Override
     public void writeTo(StreamOutput out) throws IOException {
         super.writeTo(out);
         out.writeStringArrayNullable(nodesIds);
-        if (timeout == null) {
-            out.writeBoolean(false);
-        } else {
-            out.writeBoolean(true);
-            timeout.writeTo(out);
-        }
+        out.writeOptionalWriteable(timeout);
     }
 }

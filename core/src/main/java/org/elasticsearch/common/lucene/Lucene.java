@@ -86,14 +86,9 @@ import java.util.Objects;
  *
  */
 public class Lucene {
-
-    // TODO: remove VERSION, and have users use Version.LATEST.
-    public static final Version VERSION = Version.LATEST;
-    public static final Version ANALYZER_VERSION = VERSION;
-    public static final Version QUERYPARSER_VERSION = VERSION;
     public static final String LATEST_DOC_VALUES_FORMAT = "Lucene54";
     public static final String LATEST_POSTINGS_FORMAT = "Lucene50";
-    public static final String LATEST_CODEC = "Lucene54";
+    public static final String LATEST_CODEC = "Lucene60";
 
     static {
         Deprecated annotation = PostingsFormat.forName(LATEST_POSTINGS_FORMAT).getClass().getAnnotation(Deprecated.class);
@@ -109,7 +104,6 @@ public class Lucene {
 
     public static final TopDocs EMPTY_TOP_DOCS = new TopDocs(0, EMPTY_SCORE_DOCS, 0.0f);
 
-    @SuppressWarnings("deprecation")
     public static Version parseVersion(@Nullable String version, Version defaultVersion, ESLogger logger) {
         if (version == null) {
             return defaultVersion;
@@ -117,7 +111,7 @@ public class Lucene {
         try {
             return Version.parse(version);
         } catch (ParseException e) {
-            logger.warn("no version match {}, default to {}", version, defaultVersion, e);
+            logger.warn("no version match {}, default to {}", e, version, defaultVersion);
             return defaultVersion;
         }
     }
@@ -241,16 +235,7 @@ public class Lucene {
             @Override
             protected Object doBody(String segmentFileName) throws IOException {
                 try (IndexInput input = directory.openInput(segmentFileName, IOContext.READ)) {
-                    final int format = input.readInt();
-                    final int actualFormat;
-                    if (format == CodecUtil.CODEC_MAGIC) {
-                        // 4.0+
-                        actualFormat = CodecUtil.checkHeaderNoMagic(input, "segments", SegmentInfos.VERSION_40, Integer.MAX_VALUE);
-                        if (actualFormat >= SegmentInfos.VERSION_48) {
-                            CodecUtil.checksumEntireFile(input);
-                        }
-                    }
-                    // legacy....
+                    CodecUtil.checksumEntireFile(input);
                 }
                 return null;
             }
@@ -388,7 +373,7 @@ public class Lucene {
                     writeMissingValue(out, comparatorSource.missingValue(sortField.getReverse()));
                 } else {
                     writeSortType(out, sortField.getType());
-                    writeMissingValue(out, sortField.missingValue);
+                    writeMissingValue(out, sortField.getMissingValue());
                 }
                 out.writeBoolean(sortField.getReverse());
             }
@@ -633,7 +618,7 @@ public class Lucene {
     }
 
     /**
-     * Parses the version string lenient and returns the the default value if the given string is null or emtpy
+     * Parses the version string lenient and returns the default value if the given string is null or emtpy
      */
     public static Version parseVersionLenient(String toParse, Version defaultValue) {
         return LenientParser.parse(toParse, defaultValue);
@@ -690,7 +675,7 @@ public class Lucene {
             segmentsFileName = infos.getSegmentsFileName();
             this.dir = dir;
             userData = infos.getUserData();
-            files = Collections.unmodifiableCollection(infos.files(dir, true));
+            files = Collections.unmodifiableCollection(infos.files(true));
             generation = infos.getGeneration();
             segmentCount = infos.size();
         }

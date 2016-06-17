@@ -20,7 +20,6 @@
 package org.elasticsearch.rest.action.admin.cluster.node.stats;
 
 import org.elasticsearch.action.admin.cluster.node.stats.NodesStatsRequest;
-import org.elasticsearch.action.admin.cluster.node.stats.NodesStatsResponse;
 import org.elasticsearch.action.admin.indices.stats.CommonStatsFlags;
 import org.elasticsearch.action.admin.indices.stats.CommonStatsFlags.Flag;
 import org.elasticsearch.client.Client;
@@ -31,7 +30,7 @@ import org.elasticsearch.rest.BaseRestHandler;
 import org.elasticsearch.rest.RestChannel;
 import org.elasticsearch.rest.RestController;
 import org.elasticsearch.rest.RestRequest;
-import org.elasticsearch.rest.action.support.RestToXContentListener;
+import org.elasticsearch.rest.action.support.RestActions.NodesResponseRestListener;
 
 import java.util.Set;
 
@@ -45,7 +44,7 @@ public class RestNodesStatsAction extends BaseRestHandler {
 
     @Inject
     public RestNodesStatsAction(Settings settings, RestController controller, Client client) {
-        super(settings, controller, client);
+        super(settings, client);
         controller.registerHandler(GET, "/_nodes/stats", this);
         controller.registerHandler(GET, "/_nodes/{nodeId}/stats", this);
 
@@ -81,6 +80,7 @@ public class RestNodesStatsAction extends BaseRestHandler {
             nodesStatsRequest.breaker(metrics.contains("breaker"));
             nodesStatsRequest.script(metrics.contains("script"));
             nodesStatsRequest.discovery(metrics.contains("discovery"));
+            nodesStatsRequest.ingest(metrics.contains("ingest"));
 
             // check for index specific metrics
             if (metrics.contains("indices")) {
@@ -109,7 +109,15 @@ public class RestNodesStatsAction extends BaseRestHandler {
         if (nodesStatsRequest.indices().isSet(Flag.Indexing) && (request.hasParam("types"))) {
             nodesStatsRequest.indices().types(request.paramAsStringArray("types", null));
         }
+        if (nodesStatsRequest.indices().isSet(Flag.Segments) && (request.hasParam("include_segment_file_sizes"))) {
+            nodesStatsRequest.indices().includeSegmentFileSizes(true);
+        }
 
-        client.admin().cluster().nodesStats(nodesStatsRequest, new RestToXContentListener<NodesStatsResponse>(channel));
+        client.admin().cluster().nodesStats(nodesStatsRequest, new NodesResponseRestListener<>(channel));
+    }
+
+    @Override
+    public boolean canTripCircuitBreaker() {
+        return false;
     }
 }

@@ -20,6 +20,7 @@ package org.elasticsearch.index.mapper.core;
 
 import org.apache.lucene.codecs.PostingsFormat;
 import org.apache.lucene.document.Field;
+import org.apache.lucene.index.Term;
 import org.apache.lucene.search.suggest.document.Completion50PostingsFormat;
 import org.apache.lucene.search.suggest.document.CompletionAnalyzer;
 import org.apache.lucene.search.suggest.document.CompletionQuery;
@@ -43,6 +44,7 @@ import org.elasticsearch.index.mapper.MappedFieldType;
 import org.elasticsearch.index.mapper.Mapper;
 import org.elasticsearch.index.mapper.MapperParsingException;
 import org.elasticsearch.index.mapper.ParseContext;
+import org.elasticsearch.index.mapper.TermBasedFieldType;
 import org.elasticsearch.index.mapper.object.ArrayValueMapperParser;
 import org.elasticsearch.search.suggest.completion.CompletionSuggester;
 import org.elasticsearch.search.suggest.completion.context.ContextMapping;
@@ -58,7 +60,6 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 
-import static org.elasticsearch.index.mapper.MapperBuilders.completionField;
 import static org.elasticsearch.index.mapper.core.TypeParsers.parseMultiField;
 
 /**
@@ -119,7 +120,10 @@ public class CompletionFieldMapper extends FieldMapper implements ArrayValueMapp
 
         @Override
         public Mapper.Builder<?, ?> parse(String name, Map<String, Object> node, ParserContext parserContext) throws MapperParsingException {
-            CompletionFieldMapper.Builder builder = completionField(name);
+            if (parserContext.indexVersionCreated().before(Version.V_5_0_0_alpha1)) {
+                return new CompletionFieldMapper2x.TypeParser().parse(name, node, parserContext);
+            }
+            CompletionFieldMapper.Builder builder = new CompletionFieldMapper.Builder(name);
             NamedAnalyzer indexAnalyzer = null;
             NamedAnalyzer searchAnalyzer = null;
             for (Iterator<Map.Entry<String, Object>> iterator = node.entrySet().iterator(); iterator.hasNext();) {
@@ -175,7 +179,7 @@ public class CompletionFieldMapper extends FieldMapper implements ArrayValueMapp
         }
     }
 
-    public static final class CompletionFieldType extends MappedFieldType {
+    public static final class CompletionFieldType extends TermBasedFieldType {
 
         private static PostingsFormat postingsFormat;
 
@@ -184,7 +188,6 @@ public class CompletionFieldMapper extends FieldMapper implements ArrayValueMapp
         private ContextMappings contextMappings = null;
 
         public CompletionFieldType() {
-            setFieldDataType(null);
         }
 
         private CompletionFieldType(CompletionFieldType ref) {
@@ -267,14 +270,14 @@ public class CompletionFieldMapper extends FieldMapper implements ArrayValueMapp
          * Completion prefix query
          */
         public CompletionQuery prefixQuery(Object value) {
-            return new PrefixCompletionQuery(searchAnalyzer().analyzer(), createTerm(value));
+            return new PrefixCompletionQuery(searchAnalyzer().analyzer(), new Term(name(), indexedValueForSearch(value)));
         }
 
         /**
          * Completion prefix regular expression query
          */
         public CompletionQuery regexpQuery(Object value, int flags, int maxDeterminizedStates) {
-            return new RegexCompletionQuery(createTerm(value), flags, maxDeterminizedStates);
+            return new RegexCompletionQuery(new Term(name(), indexedValueForSearch(value)), flags, maxDeterminizedStates);
         }
 
         /**
@@ -283,7 +286,7 @@ public class CompletionFieldMapper extends FieldMapper implements ArrayValueMapp
         public CompletionQuery fuzzyQuery(String value, Fuzziness fuzziness, int nonFuzzyPrefixLength,
                                           int minFuzzyPrefixLength, int maxExpansions, boolean transpositions,
                                           boolean unicodeAware) {
-            return new FuzzyCompletionQuery(searchAnalyzer().analyzer(), createTerm(value), null,
+            return new FuzzyCompletionQuery(searchAnalyzer().analyzer(), new Term(name(), indexedValueForSearch(value)), null,
                     fuzziness.asDistance(), transpositions, nonFuzzyPrefixLength, minFuzzyPrefixLength,
                     unicodeAware, maxExpansions);
         }
@@ -336,19 +339,6 @@ public class CompletionFieldMapper extends FieldMapper implements ArrayValueMapp
             } else if (hasContextMappings() && contextMappings.equals(other.contextMappings) == false) {
                 conflicts.add("mapper [" + name() + "] has different [context_mappings] values");
             }
-        }
-
-        @Override
-        public String value(Object value) {
-            if (value == null) {
-                return null;
-            }
-            return value.toString();
-        }
-
-        @Override
-        public boolean isSortable() {
-            return false;
         }
 
     }

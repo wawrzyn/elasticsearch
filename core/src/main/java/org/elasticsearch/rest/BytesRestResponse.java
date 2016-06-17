@@ -40,15 +40,11 @@ public class BytesRestResponse extends RestResponse {
     private final BytesReference content;
     private final String contentType;
 
-    public BytesRestResponse(RestStatus status) {
-        this(status, TEXT_CONTENT_TYPE, BytesArray.EMPTY);
-    }
-
     /**
      * Creates a new response based on {@link XContentBuilder}.
      */
     public BytesRestResponse(RestStatus status, XContentBuilder builder) {
-        this(status, builder.contentType().restContentType(), builder.bytes());
+        this(status, builder.contentType().mediaType(), builder.bytes());
     }
 
     /**
@@ -93,7 +89,7 @@ public class BytesRestResponse extends RestResponse {
         } else {
             XContentBuilder builder = convert(channel, status, t);
             this.content = builder.bytes();
-            this.contentType = builder.contentType().restContentType();
+            this.contentType = builder.contentType().mediaType();
         }
         if (t instanceof ElasticsearchException) {
             copyHeaders(((ElasticsearchException) t));
@@ -126,7 +122,11 @@ public class BytesRestResponse extends RestResponse {
             if (channel.request().paramAsBoolean("error_trace", !ElasticsearchException.REST_EXCEPTION_SKIP_STACK_TRACE_DEFAULT)) {
                 params =  new ToXContent.DelegatingMapParams(Collections.singletonMap(ElasticsearchException.REST_EXCEPTION_SKIP_STACK_TRACE, "false"), channel.request());
             } else {
-                SUPPRESSED_ERROR_LOGGER.info("{} Params: {}", t, channel.request().path(), channel.request().params());
+                if (status.getStatus() < 500) {
+                    SUPPRESSED_ERROR_LOGGER.debug("path: {}, params: {}", t, channel.request().rawPath(), channel.request().params());
+                } else {
+                    SUPPRESSED_ERROR_LOGGER.warn("path: {}, params: {}", t, channel.request().rawPath(), channel.request().params());
+                }
                 params = channel.request();
             }
             builder.field("error");

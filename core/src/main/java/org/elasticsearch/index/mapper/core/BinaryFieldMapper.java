@@ -22,30 +22,31 @@ package org.elasticsearch.index.mapper.core;
 import com.carrotsearch.hppc.ObjectArrayList;
 import org.apache.lucene.document.Field;
 import org.apache.lucene.index.IndexOptions;
+import org.apache.lucene.search.Query;
 import org.apache.lucene.store.ByteArrayDataOutput;
 import org.apache.lucene.util.BytesRef;
 import org.elasticsearch.ElasticsearchException;
-import org.elasticsearch.ElasticsearchParseException;
-import org.elasticsearch.Version;
-import org.elasticsearch.common.Base64;
-import org.elasticsearch.common.ParseField;
 import org.elasticsearch.common.bytes.BytesArray;
 import org.elasticsearch.common.bytes.BytesReference;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.util.CollectionUtils;
 import org.elasticsearch.common.xcontent.XContentParser;
+import org.elasticsearch.index.fielddata.IndexFieldData;
+import org.elasticsearch.index.fielddata.plain.BytesBinaryDVIndexFieldData;
+import org.elasticsearch.index.mapper.CustomDocValuesField;
 import org.elasticsearch.index.mapper.FieldMapper;
 import org.elasticsearch.index.mapper.MappedFieldType;
 import org.elasticsearch.index.mapper.Mapper;
 import org.elasticsearch.index.mapper.MapperParsingException;
 import org.elasticsearch.index.mapper.ParseContext;
+import org.elasticsearch.index.query.QueryShardContext;
+import org.elasticsearch.index.query.QueryShardException;
 
 import java.io.IOException;
-import java.util.Iterator;
+import java.util.Base64;
 import java.util.List;
 import java.util.Map;
 
-import static org.elasticsearch.index.mapper.MapperBuilders.binaryField;
 import static org.elasticsearch.index.mapper.core.TypeParsers.parseField;
 
 /**
@@ -54,9 +55,6 @@ import static org.elasticsearch.index.mapper.core.TypeParsers.parseField;
 public class BinaryFieldMapper extends FieldMapper {
 
     public static final String CONTENT_TYPE = "binary";
-    private static final ParseField COMPRESS = new ParseField("compress").withAllDeprecated("no replacement, implemented at the codec level");
-    private static final ParseField COMPRESS_THRESHOLD = new ParseField("compress_threshold").withAllDeprecated("no replacement");
-
 
     public static class Defaults {
         public static final MappedFieldType FIELD_TYPE = new BinaryFieldType();
@@ -85,16 +83,8 @@ public class BinaryFieldMapper extends FieldMapper {
     public static class TypeParser implements Mapper.TypeParser {
         @Override
         public Mapper.Builder parse(String name, Map<String, Object> node, ParserContext parserContext) throws MapperParsingException {
-            BinaryFieldMapper.Builder builder = binaryField(name);
+            BinaryFieldMapper.Builder builder = new BinaryFieldMapper.Builder(name);
             parseField(builder, name, node, parserContext);
-            for (Iterator<Map.Entry<String, Object>> iterator = node.entrySet().iterator(); iterator.hasNext();) {
-                Map.Entry<String, Object> entry = iterator.next();
-                String fieldName = entry.getKey();
-                if (parserContext.indexVersionCreated().before(Version.V_2_0_0_beta1) &&
-                        (parserContext.parseFieldMatcher().match(fieldName, COMPRESS) || parserContext.parseFieldMatcher().match(fieldName, COMPRESS_THRESHOLD))) {
-                    iterator.remove();
-                }
-            }
             return builder;
         }
     }
@@ -120,7 +110,7 @@ public class BinaryFieldMapper extends FieldMapper {
 
 
         @Override
-        public BytesReference value(Object value) {
+        public BytesReference valueForSearch(Object value) {
             if (value == null) {
                 return null;
             }
@@ -133,18 +123,20 @@ public class BinaryFieldMapper extends FieldMapper {
             } else if (value instanceof byte[]) {
                 bytes = new BytesArray((byte[]) value);
             } else {
-                try {
-                    bytes = new BytesArray(Base64.decode(value.toString()));
-                } catch (IOException e) {
-                    throw new ElasticsearchParseException("failed to convert bytes", e);
-                }
+                bytes = new BytesArray(Base64.getDecoder().decode(value.toString()));
             }
             return bytes;
         }
 
         @Override
-        public Object valueForSearch(Object value) {
-            return value(value);
+        public IndexFieldData.Builder fielddataBuilder() {
+            failIfNoDocValues();
+            return new BytesBinaryDVIndexFieldData.Builder();
+        }
+
+        @Override
+        public Query termQuery(Object value, QueryShardContext context) {
+            throw new QueryShardException(context, "Binary fields do not support searching");
         }
     }
 
@@ -190,7 +182,7 @@ public class BinaryFieldMapper extends FieldMapper {
         return CONTENT_TYPE;
     }
 
-    public static class CustomBinaryDocValuesField extends NumberFieldMapper.CustomNumericDocValuesField {
+    public static class CustomBinaryDocValuesField extends CustomDocValuesField {
 
         private final ObjectArrayList<byte[]> bytesList;
 

@@ -53,7 +53,7 @@ public class GeoShapeFieldMapperTests extends ESSingleNodeTestCase {
         GeoShapeFieldMapper geoShapeFieldMapper = (GeoShapeFieldMapper) fieldMapper;
         PrefixTreeStrategy strategy = geoShapeFieldMapper.fieldType().defaultStrategy();
 
-        assertThat(strategy.getDistErrPct(), equalTo(GeoShapeFieldMapper.Defaults.LEGACY_DISTANCE_ERROR_PCT));
+        assertThat(strategy.getDistErrPct(), equalTo(0.025d));
         assertThat(strategy.getGrid(), instanceOf(GeohashPrefixTree.class));
         assertThat(strategy.getGrid().getMaxLevels(), equalTo(GeoShapeFieldMapper.Defaults.GEOHASH_LEVELS));
         assertThat(geoShapeFieldMapper.fieldType().orientation(), equalTo(GeoShapeFieldMapper.Defaults.ORIENTATION));
@@ -376,13 +376,13 @@ public class GeoShapeFieldMapperTests extends ESSingleNodeTestCase {
                 .field("precision", "1m").field("tree_levels", 8).field("distance_error_pct", 0.01).field("orientation", "ccw")
                 .endObject().endObject().endObject().endObject().string();
         MapperService mapperService = createIndex("test").mapperService();
-        DocumentMapper docMapper = mapperService.merge("type", new CompressedXContent(stage1Mapping), true, false);
+        DocumentMapper docMapper = mapperService.merge("type", new CompressedXContent(stage1Mapping), MapperService.MergeReason.MAPPING_UPDATE, false);
         String stage2Mapping = XContentFactory.jsonBuilder().startObject().startObject("type")
                 .startObject("properties").startObject("shape").field("type", "geo_shape").field("tree", "quadtree")
                 .field("strategy", "term").field("precision", "1km").field("tree_levels", 26).field("distance_error_pct", 26)
                 .field("orientation", "cw").endObject().endObject().endObject().endObject().string();
         try {
-            mapperService.merge("type", new CompressedXContent(stage2Mapping), false, false);
+            mapperService.merge("type", new CompressedXContent(stage2Mapping), MapperService.MergeReason.MAPPING_UPDATE, false);
             fail();
         } catch (IllegalArgumentException e) {
             assertThat(e.getMessage(), containsString("mapper [shape] has different [strategy]"));
@@ -408,7 +408,7 @@ public class GeoShapeFieldMapperTests extends ESSingleNodeTestCase {
         stage2Mapping = XContentFactory.jsonBuilder().startObject().startObject("type")
                 .startObject("properties").startObject("shape").field("type", "geo_shape").field("precision", "1m")
                 .field("tree_levels", 8).field("distance_error_pct", 0.001).field("orientation", "cw").endObject().endObject().endObject().endObject().string();
-        docMapper = mapperService.merge("type", new CompressedXContent(stage2Mapping), false, false);
+        docMapper = mapperService.merge("type", new CompressedXContent(stage2Mapping), MapperService.MergeReason.MAPPING_UPDATE, false);
 
         fieldMapper = docMapper.mappers().getMapper("shape");
         assertThat(fieldMapper, instanceOf(GeoShapeFieldMapper.class));

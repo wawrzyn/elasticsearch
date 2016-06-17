@@ -18,7 +18,6 @@
  */
 package org.elasticsearch.test;
 
-import com.carrotsearch.randomizedtesting.RandomizedContext;
 import com.carrotsearch.randomizedtesting.RandomizedTest;
 import com.carrotsearch.randomizedtesting.annotations.Listeners;
 import com.carrotsearch.randomizedtesting.annotations.ThreadLeakLingering;
@@ -37,24 +36,38 @@ import org.apache.lucene.util.TestUtil;
 import org.apache.lucene.util.TimeUnits;
 import org.elasticsearch.Version;
 import org.elasticsearch.bootstrap.BootstrapForTesting;
-import org.elasticsearch.cache.recycler.MockPageCacheRecycler;
+import org.elasticsearch.common.util.MockPageCacheRecycler;
 import org.elasticsearch.client.Requests;
 import org.elasticsearch.cluster.metadata.IndexMetaData;
-import org.elasticsearch.common.SuppressForbidden;
+import org.elasticsearch.common.bytes.BytesReference;
 import org.elasticsearch.common.io.PathUtils;
 import org.elasticsearch.common.io.PathUtilsForTesting;
 import org.elasticsearch.common.logging.ESLogger;
 import org.elasticsearch.common.logging.Loggers;
 import org.elasticsearch.common.settings.Settings;
+import org.elasticsearch.common.settings.SettingsModule;
 import org.elasticsearch.common.util.MockBigArrays;
-import org.elasticsearch.common.util.concurrent.EsExecutors;
+import org.elasticsearch.common.xcontent.XContentBuilder;
+import org.elasticsearch.common.xcontent.XContentFactory;
+import org.elasticsearch.common.xcontent.XContentParser;
 import org.elasticsearch.common.xcontent.XContentType;
 import org.elasticsearch.env.Environment;
 import org.elasticsearch.env.NodeEnvironment;
+import org.elasticsearch.index.Index;
+import org.elasticsearch.index.analysis.AnalysisService;
+import org.elasticsearch.indices.IndicesService;
+import org.elasticsearch.indices.analysis.AnalysisModule;
+import org.elasticsearch.script.MockScriptEngine;
+import org.elasticsearch.script.ScriptContextRegistry;
+import org.elasticsearch.script.ScriptEngineRegistry;
+import org.elasticsearch.script.ScriptModule;
+import org.elasticsearch.script.ScriptService;
+import org.elasticsearch.script.ScriptSettings;
 import org.elasticsearch.search.MockSearchService;
 import org.elasticsearch.test.junit.listeners.LoggingListener;
 import org.elasticsearch.test.junit.listeners.ReproduceInfoPrinter;
 import org.elasticsearch.threadpool.ThreadPool;
+import org.joda.time.DateTimeZone;
 import org.junit.After;
 import org.junit.AfterClass;
 import org.junit.Before;
@@ -63,19 +76,25 @@ import org.junit.Rule;
 import org.junit.rules.RuleChain;
 
 import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
-import java.util.Random;
-import java.util.concurrent.Callable;
+import java.util.Map;
+import java.util.Set;
+import java.util.TreeMap;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BooleanSupplier;
+import java.util.function.Consumer;
+import java.util.function.Predicate;
+import java.util.function.Supplier;
 
 import static org.elasticsearch.common.util.CollectionUtils.arrayAsArrayList;
 import static org.hamcrest.Matchers.equalTo;
@@ -131,7 +150,7 @@ public abstract class ESTestCase extends LuceneTestCase {
     protected void afterIfFailed(List<Throwable> errors) {
     }
 
-    /** called after a test is finished, but only if succesfull */
+    /** called after a test is finished, but only if successful */
     protected void afterIfSuccessful() throws Exception {
     }
 
@@ -162,22 +181,6 @@ public abstract class ESTestCase extends LuceneTestCase {
         Requests.INDEX_CONTENT_TYPE = XContentType.JSON;
     }
 
-    // randomize and override the number of cpus so tests reproduce regardless of real number of cpus
-
-    @BeforeClass
-    @SuppressForbidden(reason = "sets the number of cpus during tests")
-    public static void setProcessors() {
-        int numCpu = TestUtil.nextInt(random(), 1, 4);
-        System.setProperty(EsExecutors.DEFAULT_SYSPROP, Integer.toString(numCpu));
-        assertEquals(numCpu, EsExecutors.boundedNumberOfProcessors(Settings.EMPTY));
-    }
-
-    @AfterClass
-    @SuppressForbidden(reason = "clears the number of cpus during tests")
-    public static void restoreProcessors() {
-        System.clearProperty(EsExecutors.DEFAULT_SYSPROP);
-    }
-
     @After
     public final void ensureCleanedUp() throws Exception {
         MockPageCacheRecycler.ensureAllPagesAreReleased();
@@ -190,12 +193,7 @@ public abstract class ESTestCase extends LuceneTestCase {
     // this must be a separate method from other ensure checks above so suite scoped integ tests can call...TODO: fix that
     @After
     public final void ensureAllSearchContextsReleased() throws Exception {
-        assertBusy(new Runnable() {
-            @Override
-            public void run() {
-                MockSearchService.assertNoInFLightContext();
-            }
-        });
+        assertBusy(() -> MockSearchService.assertNoInFlightContext());
     }
 
     // mockdirectorywrappers currently set this boolean if checkindex fails
@@ -218,15 +216,8 @@ public abstract class ESTestCase extends LuceneTestCase {
     // Test facilities and facades for subclasses.
     // -----------------------------------------------------------------
 
-    // TODO: replaces uses of getRandom() with random()
     // TODO: decide on one set of naming for between/scaledBetween and remove others
     // TODO: replace frequently() with usually()
-
-    /** Shortcut for {@link RandomizedContext#getRandom()}. Use {@link #random()} instead. */
-    public static Random getRandom() {
-        // TODO: replace uses of this function with random()
-        return random();
-    }
 
     /**
      * Returns a "scaled" random number between min and max (inclusive).
@@ -299,10 +290,10 @@ public abstract class ESTestCase extends LuceneTestCase {
      * Returns a double value in the interval [start, end) if lowerInclusive is
      * set to true, (start, end) otherwise.
      *
-     * @param start lower bound of interval to draw uniformly distributed random numbers from
-     * @param end upper bound
+     * @param start          lower bound of interval to draw uniformly distributed random numbers from
+     * @param end            upper bound
      * @param lowerInclusive whether or not to include lower end of the interval
-     * */
+     */
     public static double randomDoubleBetween(double start, double end, boolean lowerInclusive) {
         double result = 0.0;
 
@@ -399,33 +390,71 @@ public abstract class ESTestCase extends LuceneTestCase {
         return generateRandomStringArray(maxArraySize, maxStringSize, allowNull, true);
     }
 
+    private static String[] TIME_SUFFIXES = new String[]{"d", "H", "ms", "s", "S", "w"};
+
+    private static String randomTimeValue(int lower, int upper) {
+        return randomIntBetween(lower, upper) + randomFrom(TIME_SUFFIXES);
+    }
+
     public static String randomTimeValue() {
-        final String[] values = new String[]{"d", "H", "ms", "s", "S", "w"};
-        return randomIntBetween(0, 1000) + randomFrom(values);
+        return randomTimeValue(0, 1000);
+    }
+
+    public static String randomPositiveTimeValue() {
+        return randomTimeValue(1, 1000);
+    }
+
+    /**
+     * generate a random DateTimeZone from the ones available in joda library
+     */
+    public static DateTimeZone randomDateTimeZone() {
+        List<String> ids = new ArrayList<>(DateTimeZone.getAvailableIDs());
+        Collections.sort(ids);
+        return DateTimeZone.forID(randomFrom(ids));
+    }
+
+    /**
+     * helper to randomly perform on <code>consumer</code> with <code>value</code>
+     */
+    public static <T> void maybeSet(Consumer<T> consumer, T value) {
+        if (randomBoolean()) {
+            consumer.accept(value);
+        }
+    }
+
+    /**
+     * helper to get a random value in a certain range that's different from the input
+     */
+    public static <T> T randomValueOtherThan(T input, Supplier<T> randomSupplier) {
+        if (input != null) {
+            return randomValueOtherThanMany(input::equals, randomSupplier);
+        }
+
+        return(randomSupplier.get());
+    }
+
+    /**
+     * helper to get a random value in a certain range that's different from the input
+     */
+    public static <T> T randomValueOtherThanMany(Predicate<T> input, Supplier<T> randomSupplier) {
+        T randomValue = null;
+        do {
+            randomValue = randomSupplier.get();
+        } while (input.test(randomValue));
+        return randomValue;
     }
 
     /**
      * Runs the code block for 10 seconds waiting for no assertion to trip.
      */
     public static void assertBusy(Runnable codeBlock) throws Exception {
-        assertBusy(Executors.callable(codeBlock), 10, TimeUnit.SECONDS);
-    }
-
-    public static void assertBusy(Runnable codeBlock, long maxWaitTime, TimeUnit unit) throws Exception {
-        assertBusy(Executors.callable(codeBlock), maxWaitTime, unit);
-    }
-
-    /**
-     * Runs the code block for 10 seconds waiting for no assertion to trip.
-     */
-    public static <V> V assertBusy(Callable<V> codeBlock) throws Exception {
-        return assertBusy(codeBlock, 10, TimeUnit.SECONDS);
+        assertBusy(codeBlock, 10, TimeUnit.SECONDS);
     }
 
     /**
      * Runs the code block for the provided interval, waiting for no assertions to trip.
      */
-    public static <V> V assertBusy(Callable<V> codeBlock, long maxWaitTime, TimeUnit unit) throws Exception {
+    public static void assertBusy(Runnable codeBlock, long maxWaitTime, TimeUnit unit) throws Exception {
         long maxTimeInMillis = TimeUnit.MILLISECONDS.convert(maxWaitTime, unit);
         long iterations = Math.max(Math.round(Math.log10(maxTimeInMillis) / Math.log10(2)), 1);
         long timeInMillis = 1;
@@ -433,7 +462,8 @@ public abstract class ESTestCase extends LuceneTestCase {
         List<AssertionError> failures = new ArrayList<>();
         for (int i = 0; i < iterations; i++) {
             try {
-                return codeBlock.call();
+                codeBlock.run();
+                return;
             } catch (AssertionError e) {
                 failures.add(e);
             }
@@ -444,7 +474,7 @@ public abstract class ESTestCase extends LuceneTestCase {
         timeInMillis = maxTimeInMillis - sum;
         Thread.sleep(Math.max(timeInMillis, 0));
         try {
-            return codeBlock.call();
+            codeBlock.run();
         } catch (AssertionError e) {
             for (AssertionError failure : failures) {
                 e.addSuppressed(failure);
@@ -531,8 +561,8 @@ public abstract class ESTestCase extends LuceneTestCase {
     public NodeEnvironment newNodeEnvironment(Settings settings) throws IOException {
         Settings build = Settings.builder()
                 .put(settings)
-                .put("path.home", createTempDir().toAbsolutePath())
-                .putArray("path.data", tmpPaths()).build();
+                .put(Environment.PATH_HOME_SETTING.getKey(), createTempDir().toAbsolutePath())
+                .putArray(Environment.PATH_DATA_SETTING.getKey(), tmpPaths()).build();
         return new NodeEnvironment(build, new Environment(build));
     }
 
@@ -563,12 +593,80 @@ public abstract class ESTestCase extends LuceneTestCase {
      * Returns size random values
      */
     public static <T> List<T> randomSubsetOf(int size, T... values) {
-        if (size > values.length) {
-            throw new IllegalArgumentException("Can\'t pick " + size + " random objects from a list of " + values.length + " objects");
-        }
         List<T> list = arrayAsArrayList(values);
-        Collections.shuffle(list, random());
-        return list.subList(0, size);
+        return randomSubsetOf(size, list);
+    }
+
+    /**
+     * Returns a random subset of values (including a potential empty list)
+     */
+    public static <T> List<T> randomSubsetOf(Collection<T> collection) {
+        return randomSubsetOf(randomInt(collection.size() - 1), collection);
+    }
+
+    /**
+     * Returns size random values
+     */
+    public static <T> List<T> randomSubsetOf(int size, Collection<T> collection) {
+        if (size > collection.size()) {
+            throw new IllegalArgumentException("Can\'t pick " + size + " random objects from a collection of " + collection.size() + " objects");
+        }
+        List<T> tempList = new ArrayList<>(collection);
+        Collections.shuffle(tempList, random());
+        return tempList.subList(0, size);
+    }
+
+    /**
+     * Builds a set of unique items. Usually you'll get the requested count but you might get less than that number if the supplier returns
+     * lots of repeats. Make sure that the items properly implement equals and hashcode.
+     */
+    public static <T> Set<T> randomUnique(Supplier<T> supplier, int targetCount) {
+        Set<T> things = new HashSet<>();
+        int maxTries = targetCount * 10;
+        for (int t = 0; t < maxTries; t++) {
+            if (things.size() == targetCount) {
+                return things;
+            }
+            things.add(supplier.get());
+        }
+        // Oh well, we didn't get enough unique things. It'll be ok.
+        return things;
+    }
+
+    /**
+     * Randomly shuffles the fields inside objects in the {@link XContentBuilder} passed in.
+     * Recursively goes through inner objects and also shuffles them. Exceptions for this
+     * recursive shuffling behavior can be made by passing in the names of fields which
+     * internally should stay untouched.
+     */
+    public static XContentBuilder shuffleXContent(XContentBuilder builder, String... exceptFieldNames) throws IOException {
+        BytesReference bytes = builder.bytes();
+        XContentParser parser = XContentFactory.xContent(bytes).createParser(bytes);
+        // use ordered maps for reproducibility
+        Map<String, Object> shuffledMap = shuffleMap(parser.mapOrdered(), new HashSet<>(Arrays.asList(exceptFieldNames)));
+        XContentBuilder xContentBuilder = XContentFactory.contentBuilder(builder.contentType());
+        if (builder.isPrettyPrint()) {
+            xContentBuilder.prettyPrint();
+        }
+        return xContentBuilder.map(shuffledMap);
+    }
+
+    private static Map<String, Object> shuffleMap(Map<String, Object> map, Set<String> exceptFields) {
+        List<String> keys = new ArrayList<>(map.keySet());
+
+        // even though we shuffle later, we need this to make tests reproduce on different jvms
+        Collections.sort(keys);
+        Map<String, Object> targetMap = new TreeMap<>();
+        Collections.shuffle(keys, random());
+        for (String key : keys) {
+            Object value = map.get(key);
+            if (value instanceof Map && exceptFields.contains(key) == false) {
+                targetMap.put(key, shuffleMap((Map) value, exceptFields));
+            } else {
+                targetMap.put(key, value);
+            }
+        }
+        return targetMap;
     }
 
     /**
@@ -580,17 +678,17 @@ public abstract class ESTestCase extends LuceneTestCase {
         return enabled;
     }
 
-    /**
-     * Asserts that there are no files in the specified path
-     */
-    public void assertPathHasBeenCleared(String path) throws Exception {
-        assertPathHasBeenCleared(PathUtils.get(path));
+    public void assertAllIndicesRemovedAndDeletionCompleted(Iterable<IndicesService> indicesServices) throws Exception {
+        for (IndicesService indicesService : indicesServices) {
+            assertBusy(() -> assertFalse(indicesService.iterator().hasNext()), 1, TimeUnit.MINUTES);
+            assertBusy(() -> assertFalse(indicesService.hasUncompletedPendingDeletes()), 1, TimeUnit.MINUTES);
+        }
     }
 
     /**
      * Asserts that there are no files in the specified path
      */
-    public void assertPathHasBeenCleared(Path path) throws Exception {
+    public void assertPathHasBeenCleared(Path path) {
         logger.info("--> checking that [{}] has been cleared", path);
         int count = 0;
         StringBuilder sb = new StringBuilder();
@@ -611,6 +709,8 @@ public abstract class ESTestCase extends LuceneTestCase {
                         sb.append("\n");
                     }
                 }
+            } catch (IOException e) {
+                throw new UncheckedIOException(e);
             }
         }
         sb.append("]");
@@ -637,5 +737,67 @@ public abstract class ESTestCase extends LuceneTestCase {
         assertEquals(expected.getFileName(), actual.getFileName());
         assertEquals(expected.getLineNumber(), actual.getLineNumber());
         assertEquals(expected.isNativeMethod(), actual.isNativeMethod());
+    }
+
+    protected static long spinForAtLeastOneMillisecond() {
+        long nanosecondsInMillisecond = TimeUnit.NANOSECONDS.convert(1, TimeUnit.MILLISECONDS);
+        // force at least one millisecond to elapse, but ensure the
+        // clock has enough resolution to observe the passage of time
+        long start = System.nanoTime();
+        long elapsed;
+        while ((elapsed = (System.nanoTime() - start)) < nanosecondsInMillisecond) {
+            // busy spin
+        }
+        return elapsed;
+    }
+
+    /**
+     * Creates an AnalysisService to test analysis factories and analyzers.
+     */
+    @SafeVarargs
+    public static AnalysisService createAnalysisService(Index index, Settings settings, Consumer<AnalysisModule>... moduleConsumers) throws IOException {
+        Settings nodeSettings = Settings.builder().put(Environment.PATH_HOME_SETTING.getKey(), createTempDir()).build();
+        return createAnalysisService(index, nodeSettings, settings, moduleConsumers);
+    }
+
+    /**
+     * Creates an AnalysisService to test analysis factories and analyzers.
+     */
+    @SafeVarargs
+    public static AnalysisService createAnalysisService(Index index, Settings nodeSettings, Settings settings, Consumer<AnalysisModule>... moduleConsumers) throws IOException {
+        Settings indexSettings = Settings.builder().put(settings)
+            .put(IndexMetaData.SETTING_VERSION_CREATED, Version.CURRENT)
+            .build();
+        Environment env = new Environment(nodeSettings);
+        AnalysisModule analysisModule = new AnalysisModule(env);
+        for (Consumer<AnalysisModule> consumer : moduleConsumers) {
+            consumer.accept(analysisModule);
+        }
+        SettingsModule settingsModule = new SettingsModule(nodeSettings, InternalSettingsPlugin.VERSION_CREATED);
+        final AnalysisService analysisService = analysisModule.buildRegistry().build(IndexSettingsModule.newIndexSettings(index, indexSettings));
+        return analysisService;
+    }
+
+    public static ScriptModule newTestScriptModule() {
+        return new ScriptModule(new MockScriptEngine()) {
+            @Override
+            protected void configure() {
+                Settings settings = Settings.builder()
+                    .put(Environment.PATH_HOME_SETTING.getKey(), createTempDir())
+                    // no file watching, so we don't need a ResourceWatcherService
+                    .put(ScriptService.SCRIPT_AUTO_RELOAD_ENABLED_SETTING.getKey(), false)
+                    .build();
+                bind(ScriptEngineRegistry.class).toInstance(scriptEngineRegistry);
+                bind(ScriptContextRegistry.class).toInstance(scriptContextRegistry);
+                bind(ScriptSettings.class).toInstance(scriptSettings);
+                try {
+                    ScriptService scriptService = new ScriptService(settings, new Environment(settings), null,
+                        scriptEngineRegistry, scriptContextRegistry, scriptSettings);
+                    bind(ScriptService.class).toInstance(scriptService);
+                } catch (IOException e) {
+                    throw new IllegalStateException("error while binding ScriptService", e);
+                }
+            }
+        };
     }
 }

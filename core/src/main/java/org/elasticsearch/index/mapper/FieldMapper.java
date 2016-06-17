@@ -25,13 +25,13 @@ import org.apache.lucene.document.Field;
 import org.apache.lucene.document.FieldType;
 import org.apache.lucene.index.IndexOptions;
 import org.elasticsearch.Version;
-import org.elasticsearch.common.Nullable;
 import org.elasticsearch.common.collect.ImmutableOpenMap;
 import org.elasticsearch.common.lucene.Lucene;
+import org.elasticsearch.common.settings.Setting;
+import org.elasticsearch.common.settings.Setting.Property;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.xcontent.XContentBuilder;
 import org.elasticsearch.index.analysis.NamedAnalyzer;
-import org.elasticsearch.index.fielddata.FieldDataType;
 import org.elasticsearch.index.mapper.core.TypeParsers;
 import org.elasticsearch.index.mapper.internal.AllFieldMapper;
 import org.elasticsearch.index.similarity.SimilarityProvider;
@@ -48,19 +48,19 @@ import java.util.Map;
 import java.util.stream.StreamSupport;
 
 public abstract class FieldMapper extends Mapper implements Cloneable {
-
+    public static final Setting<Boolean> IGNORE_MALFORMED_SETTING =
+        Setting.boolSetting("index.mapping.ignore_malformed", false, Property.IndexScope);
+    public static final Setting<Boolean> COERCE_SETTING =
+        Setting.boolSetting("index.mapping.coerce", false, Property.IndexScope);
     public abstract static class Builder<T extends Builder, Y extends FieldMapper> extends Mapper.Builder<T, Y> {
 
         protected final MappedFieldType fieldType;
         protected final MappedFieldType defaultFieldType;
         private final IndexOptions defaultOptions;
         protected boolean omitNormsSet = false;
-        protected String indexName;
         protected Boolean includeInAll;
         protected boolean indexOptionsSet = false;
         protected boolean docValuesSet = false;
-        @Nullable
-        protected Settings fieldDataSettings;
         protected final MultiFields.Builder multiFieldsBuilder;
         protected CopyTo copyTo;
 
@@ -69,6 +69,7 @@ public abstract class FieldMapper extends Mapper implements Cloneable {
             this.fieldType = fieldType.clone();
             this.defaultFieldType = defaultFieldType.clone();
             this.defaultOptions = fieldType.indexOptions(); // we have to store it the fieldType is mutable
+            this.docValuesSet = fieldType.hasDocValues();
             multiFieldsBuilder = new MultiFields.Builder();
         }
 
@@ -167,11 +168,6 @@ public abstract class FieldMapper extends Mapper implements Cloneable {
             return builder;
         }
 
-        public T indexName(String indexName) {
-            this.indexName = indexName;
-            return builder;
-        }
-
         public T indexAnalyzer(NamedAnalyzer indexAnalyzer) {
             this.fieldType.setIndexAnalyzer(indexAnalyzer);
             return builder;
@@ -182,6 +178,11 @@ public abstract class FieldMapper extends Mapper implements Cloneable {
             return builder;
         }
 
+        public T searchQuoteAnalyzer(NamedAnalyzer searchQuoteAnalyzer) {
+            this.fieldType.setSearchQuoteAnalyzer(searchQuoteAnalyzer);
+            return builder;
+        }
+
         public T includeInAll(Boolean includeInAll) {
             this.includeInAll = includeInAll;
             return builder;
@@ -189,16 +190,6 @@ public abstract class FieldMapper extends Mapper implements Cloneable {
 
         public T similarity(SimilarityProvider similarity) {
             this.fieldType.setSimilarity(similarity);
-            return builder;
-        }
-
-        public T normsLoading(MappedFieldType.Loading normsLoading) {
-            this.fieldType.setNormsLoading(normsLoading);
-            return builder;
-        }
-
-        public T fieldDataSettings(Settings settings) {
-            this.fieldDataSettings = settings;
             return builder;
         }
 
@@ -221,30 +212,28 @@ public abstract class FieldMapper extends Mapper implements Cloneable {
             return context.path().pathAsText(name);
         }
 
+        protected boolean defaultDocValues(Version indexCreated) {
+            if (indexCreated.onOrAfter(Version.V_5_0_0_alpha1)) {
+                // add doc values by default to keyword (boolean, numerics, etc.) fields
+                return fieldType.tokenized() == false;
+            } else {
+                return fieldType.tokenized() == false && fieldType.indexOptions() != IndexOptions.NONE;
+            }
+        }
+
         protected void setupFieldType(BuilderContext context) {
             fieldType.setName(buildFullName(context));
+            if (context.indexCreatedVersion().before(Version.V_5_0_0_alpha1)) {
+                fieldType.setOmitNorms(fieldType.omitNorms() && fieldType.boost() == 1.0f);
+            }
             if (fieldType.indexAnalyzer() == null && fieldType.tokenized() == false && fieldType.indexOptions() != IndexOptions.NONE) {
                 fieldType.setIndexAnalyzer(Lucene.KEYWORD_ANALYZER);
                 fieldType.setSearchAnalyzer(Lucene.KEYWORD_ANALYZER);
             }
-            if (fieldDataSettings != null) {
-                Settings settings = Settings.builder().put(fieldType.fieldDataType().getSettings()).put(fieldDataSettings).build();
-                fieldType.setFieldDataType(new FieldDataType(fieldType.fieldDataType().getType(), settings));
-            }
-            boolean defaultDocValues = false; // pre 2.0
-            if (context.indexCreatedVersion().onOrAfter(Version.V_2_0_0_beta1)) {
-                defaultDocValues = fieldType.tokenized() == false && fieldType.indexOptions() != IndexOptions.NONE;
-            }
-            // backcompat for "fielddata: format: docvalues" for now...
-            boolean fieldDataDocValues = fieldType.fieldDataType() != null
-                && FieldDataType.DOC_VALUES_FORMAT_VALUE.equals(fieldType.fieldDataType().getFormat(context.indexSettings()));
-            if (fieldDataDocValues && docValuesSet && fieldType.hasDocValues() == false) {
-                // this forces the doc_values setting to be written, so fielddata does not mask the original setting
-                defaultDocValues = true;
-            }
+            boolean defaultDocValues = defaultDocValues(context.indexCreatedVersion());
             defaultFieldType.setHasDocValues(defaultDocValues);
             if (docValuesSet == false) {
-                fieldType.setHasDocValues(defaultDocValues || fieldDataDocValues);
+                fieldType.setHasDocValues(defaultDocValues);
             }
         }
     }
@@ -253,12 +242,10 @@ public abstract class FieldMapper extends Mapper implements Cloneable {
     protected final MappedFieldType defaultFieldType;
     protected MultiFields multiFields;
     protected CopyTo copyTo;
-    protected final boolean indexCreatedBefore2x;
 
     protected FieldMapper(String simpleName, MappedFieldType fieldType, MappedFieldType defaultFieldType, Settings indexSettings, MultiFields multiFields, CopyTo copyTo) {
         super(simpleName);
         assert indexSettings != null;
-        this.indexCreatedBefore2x = Version.indexCreated(indexSettings).before(Version.V_2_0_0_beta1);
         fieldType.freeze();
         this.fieldType = fieldType;
         defaultFieldType.freeze();
@@ -293,7 +280,10 @@ public abstract class FieldMapper extends Mapper implements Cloneable {
         try {
             parseCreateField(context, fields);
             for (Field field : fields) {
-                if (!customBoost()) {
+                if (!customBoost()
+                        // don't set boosts eg. on dv fields
+                        && field.fieldType().indexOptions() != IndexOptions.NONE
+                        && Version.indexCreated(context.indexSettings()).before(Version.V_5_0_0_alpha1)) {
                     field.setBoost(fieldType().boost());
                 }
                 context.doc().add(field);
@@ -362,9 +352,12 @@ public abstract class FieldMapper extends Mapper implements Cloneable {
     public FieldMapper updateFieldType(Map<String, MappedFieldType> fullNameToFieldType) {
         final MappedFieldType newFieldType = fullNameToFieldType.get(fieldType.name());
         if (newFieldType == null) {
-            throw new IllegalStateException();
+            // this field does not exist in the mappings yet
+            // this can happen if this mapper represents a mapping update
+            return this;
         } else if (fieldType.getClass() != newFieldType.getClass()) {
-            throw new IllegalStateException("Mixing up field types: " + fieldType.getClass() + " != " + newFieldType.getClass());
+            throw new IllegalStateException("Mixing up field types: " +
+                fieldType.getClass() + " != " + newFieldType.getClass() + " on field " + fieldType.name());
         }
         MultiFields updatedMultiFields = multiFields.updateFieldType(fullNameToFieldType);
         if (fieldType == newFieldType && multiFields == updatedMultiFields) {
@@ -396,7 +389,7 @@ public abstract class FieldMapper extends Mapper implements Cloneable {
         boolean defaultIndexed = defaultFieldType.indexOptions() != IndexOptions.NONE;
         if (includeDefaults || indexed != defaultIndexed ||
             fieldType().tokenized() != defaultFieldType.tokenized()) {
-            builder.field("index", indexTokenizeOptionToString(indexed, fieldType().tokenized()));
+            builder.field("index", indexTokenizeOption(indexed, fieldType().tokenized()));
         }
         if (includeDefaults || fieldType().stored() != defaultFieldType.stored()) {
             builder.field("store", fieldType().stored());
@@ -405,21 +398,15 @@ public abstract class FieldMapper extends Mapper implements Cloneable {
         if (includeDefaults || fieldType().storeTermVectors() != defaultFieldType.storeTermVectors()) {
             builder.field("term_vector", termVectorOptionsToString(fieldType()));
         }
-        if (includeDefaults || fieldType().omitNorms() != defaultFieldType.omitNorms() || fieldType().normsLoading() != null) {
-            builder.startObject("norms");
-            if (includeDefaults || fieldType().omitNorms() != defaultFieldType.omitNorms()) {
-                builder.field("enabled", !fieldType().omitNorms());
-            }
-            if (fieldType().normsLoading() != null) {
-                builder.field(MappedFieldType.Loading.KEY, fieldType().normsLoading());
-            }
-            builder.endObject();
+        if (includeDefaults || fieldType().omitNorms() != defaultFieldType.omitNorms()) {
+            builder.field("norms", fieldType().omitNorms() == false);
         }
         if (indexed && (includeDefaults || fieldType().indexOptions() != defaultFieldType.indexOptions())) {
             builder.field("index_options", indexOptionToString(fieldType().indexOptions()));
         }
-
-        doXContentAnalyzers(builder, includeDefaults);
+        if (includeDefaults || fieldType().eagerGlobalOrdinals() != defaultFieldType.eagerGlobalOrdinals()) {
+            builder.field("eager_global_ordinals", fieldType().eagerGlobalOrdinals());
+        }
 
         if (fieldType().similarity() != null) {
             builder.field("similarity", fieldType().similarity().name());
@@ -427,9 +414,6 @@ public abstract class FieldMapper extends Mapper implements Cloneable {
             builder.field("similarity", SimilarityService.DEFAULT_SIMILARITY);
         }
 
-        if (includeDefaults || hasCustomFieldDataSettings()) {
-            builder.field("fielddata", fieldType().fieldDataType().getSettings().getAsMap());
-        }
         multiFields.toXContent(builder, params);
 
         if (copyTo != null) {
@@ -437,15 +421,26 @@ public abstract class FieldMapper extends Mapper implements Cloneable {
         }
     }
 
-    protected void doXContentAnalyzers(XContentBuilder builder, boolean includeDefaults) throws IOException {
+    protected final void doXContentAnalyzers(XContentBuilder builder, boolean includeDefaults) throws IOException {
+        if (fieldType.tokenized() == false) {
+            return;
+        }
         if (fieldType().indexAnalyzer() == null) {
             if (includeDefaults) {
                 builder.field("analyzer", "default");
             }
-        } else if (includeDefaults || fieldType().indexAnalyzer().name().startsWith("_") == false && fieldType().indexAnalyzer().name().equals("default") == false) {
-            builder.field("analyzer", fieldType().indexAnalyzer().name());
-            if (fieldType().searchAnalyzer().name().equals(fieldType().indexAnalyzer().name()) == false) {
-                builder.field("search_analyzer", fieldType().searchAnalyzer().name());
+        } else {
+            boolean hasDefaultIndexAnalyzer = fieldType().indexAnalyzer().name().equals("default");
+            boolean hasDifferentSearchAnalyzer = fieldType().searchAnalyzer().name().equals(fieldType().indexAnalyzer().name()) == false;
+            boolean hasDifferentSearchQuoteAnalyzer = fieldType().searchAnalyzer().name().equals(fieldType().searchQuoteAnalyzer().name()) == false;
+            if (includeDefaults || hasDefaultIndexAnalyzer == false || hasDifferentSearchAnalyzer || hasDifferentSearchQuoteAnalyzer) {
+                builder.field("analyzer", fieldType().indexAnalyzer().name());
+                if (hasDifferentSearchAnalyzer || hasDifferentSearchQuoteAnalyzer) {
+                    builder.field("search_analyzer", fieldType().searchAnalyzer().name());
+                    if (hasDifferentSearchQuoteAnalyzer) {
+                        builder.field("search_quote_analyzer", fieldType().searchQuoteAnalyzer().name());
+                    }
+                }
             }
         }
     }
@@ -493,18 +488,9 @@ public abstract class FieldMapper extends Mapper implements Cloneable {
         }
     }
 
-    protected static String indexTokenizeOptionToString(boolean indexed, boolean tokenized) {
-        if (!indexed) {
-            return "no";
-        } else if (tokenized) {
-            return "analyzed";
-        } else {
-            return "not_analyzed";
-        }
-    }
-
-    protected boolean hasCustomFieldDataSettings() {
-        return fieldType().fieldDataType() != null && fieldType().fieldDataType().equals(defaultFieldType.fieldDataType()) == false;
+    /* Only protected so that string can override it */
+    protected Object indexTokenizeOption(boolean indexed, boolean tokenized) {
+        return indexed;
     }
 
     protected abstract String contentType();

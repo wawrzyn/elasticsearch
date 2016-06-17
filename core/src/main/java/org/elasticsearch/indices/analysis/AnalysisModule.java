@@ -54,16 +54,6 @@ import java.util.Map;
  * The {@link org.elasticsearch.indices.analysis.AnalysisModule.AnalysisProvider} is only a functional interface that allows to register factory constructors directly like the plugin example below:
  * <pre>
  *     public class MyAnalysisPlugin extends Plugin {
- *       \@Override
- *       public String name() {
- *         return "analysis-my-plugin";
- *       }
- *
- *       \@Override
- *       public String description() {
- *         return "my very fast and efficient analyzer";
- *       }
- *
  *       public void onModule(AnalysisModule module) {
  *         module.registerAnalyzer("my-analyzer-name", MyAnalyzer::new);
  *       }
@@ -73,12 +63,12 @@ import java.util.Map;
 public final class AnalysisModule extends AbstractModule {
 
     static {
-        Settings build = Settings.settingsBuilder().put(IndexMetaData.SETTING_VERSION_CREATED, Version.CURRENT)
+        Settings build = Settings.builder().put(IndexMetaData.SETTING_VERSION_CREATED, Version.CURRENT)
                 .put(IndexMetaData.SETTING_NUMBER_OF_REPLICAS, 1)
                 .put(IndexMetaData.SETTING_NUMBER_OF_SHARDS, 1)
                 .build();
         IndexMetaData metaData = IndexMetaData.builder("_na_").settings(build).build();
-        NA_INDEX_SETTINGS = new IndexSettings(metaData, Settings.EMPTY, Collections.emptyList());
+        NA_INDEX_SETTINGS = new IndexSettings(metaData, Settings.EMPTY);
     }
     private static final IndexSettings NA_INDEX_SETTINGS;
     private final Environment environment;
@@ -160,13 +150,19 @@ public final class AnalysisModule extends AbstractModule {
     @Override
     protected void configure() {
         try {
-            HunspellService service = new HunspellService(environment.settings(), environment, knownDictionaries);
-            AnalysisRegistry registry = new AnalysisRegistry(service, environment, charFilters, tokenFilters, tokenizers, analyzers);
-            bind(HunspellService.class).toInstance(service);
+            AnalysisRegistry registry = buildRegistry();
+            bind(HunspellService.class).toInstance(registry.getHunspellService());
             bind(AnalysisRegistry.class).toInstance(registry);
         } catch (IOException e) {
             throw new ElasticsearchException("failed to load hunspell service", e);
         }
+    }
+
+    /**
+     * Builds an {@link AnalysisRegistry} from the current configuration.
+     */
+    public AnalysisRegistry buildRegistry() throws IOException {
+        return new AnalysisRegistry(new HunspellService(environment.settings(), environment, knownDictionaries), environment, charFilters, tokenFilters, tokenizers, analyzers);
     }
 
     /**

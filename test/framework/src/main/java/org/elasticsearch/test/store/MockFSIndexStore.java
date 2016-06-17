@@ -22,7 +22,10 @@ package org.elasticsearch.test.store;
 import org.elasticsearch.common.Nullable;
 import org.elasticsearch.common.logging.ESLogger;
 import org.elasticsearch.common.logging.Loggers;
+import org.elasticsearch.common.settings.Setting;
+import org.elasticsearch.common.settings.Setting.Property;
 import org.elasticsearch.common.settings.Settings;
+import org.elasticsearch.common.settings.SettingsModule;
 import org.elasticsearch.index.IndexModule;
 import org.elasticsearch.index.IndexSettings;
 import org.elasticsearch.index.shard.IndexEventListener;
@@ -35,34 +38,39 @@ import org.elasticsearch.index.store.IndexStore;
 import org.elasticsearch.index.store.IndexStoreConfig;
 import org.elasticsearch.plugins.Plugin;
 
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.EnumSet;
 import java.util.IdentityHashMap;
+import java.util.List;
 import java.util.Map;
 
 public class MockFSIndexStore extends IndexStore {
 
-    public static final String CHECK_INDEX_ON_CLOSE = "index.store.mock.check_index_on_close";
+    public static final Setting<Boolean> INDEX_CHECK_INDEX_ON_CLOSE_SETTING =
+        Setting.boolSetting("index.store.mock.check_index_on_close", true, Property.IndexScope, Property.NodeScope);
 
     public static class TestPlugin extends Plugin {
         @Override
-        public String name() {
-            return "mock-index-store";
-        }
-        @Override
-        public String description() {
-            return "a mock index store for testing";
-        }
-        @Override
         public Settings additionalSettings() {
-            return Settings.builder().put(IndexModule.STORE_TYPE, "mock").build();
+            return Settings.builder().put(IndexModule.INDEX_STORE_TYPE_SETTING.getKey(), "mock").build();
+        }
+
+        @Override
+        public List<Setting<?>> getSettings() {
+            return Arrays.asList(INDEX_CHECK_INDEX_ON_CLOSE_SETTING,
+            MockFSDirectoryService.CRASH_INDEX_SETTING,
+            MockFSDirectoryService.RANDOM_IO_EXCEPTION_RATE_SETTING,
+            MockFSDirectoryService.RANDOM_PREVENT_DOUBLE_WRITE_SETTING,
+            MockFSDirectoryService.RANDOM_NO_DELETE_OPEN_FILE_SETTING,
+            MockFSDirectoryService.RANDOM_IO_EXCEPTION_RATE_ON_OPEN_SETTING);
         }
 
         @Override
         public void onIndexModule(IndexModule indexModule) {
             Settings indexSettings = indexModule.getSettings();
-            if ("mock".equals(indexSettings.get(IndexModule.STORE_TYPE))) {
-                if (indexSettings.getAsBoolean(CHECK_INDEX_ON_CLOSE, true)) {
+            if ("mock".equals(indexSettings.get(IndexModule.INDEX_STORE_TYPE_SETTING.getKey()))) {
+                if (INDEX_CHECK_INDEX_ON_CLOSE_SETTING.get(indexSettings)) {
                     indexModule.addIndexEventListener(new Listener());
                 }
                 indexModule.addIndexStore("mock", MockFSIndexStore::new);

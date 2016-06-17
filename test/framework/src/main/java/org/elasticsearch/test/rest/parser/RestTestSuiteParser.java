@@ -57,14 +57,11 @@ public class RestTestSuiteParser implements RestTestFragmentParser<RestTestSuite
             }
         }
 
-        XContentParser parser = YamlXContent.yamlXContent.createParser(Files.newInputStream(file));
-        try {
+        try (XContentParser parser = YamlXContent.yamlXContent.createParser(Files.newInputStream(file))) {
             RestTestSuiteParseContext testParseContext = new RestTestSuiteParseContext(api, filename, parser);
             return parse(testParseContext);
         } catch(Exception e) {
             throw new RestTestParseException("Error parsing " + api + "/" + filename, e);
-        } finally {
-            parser.close();
         }
     }
 
@@ -73,7 +70,7 @@ public class RestTestSuiteParser implements RestTestFragmentParser<RestTestSuite
         XContentParser parser = parseContext.parser();
 
         parser.nextToken();
-        assert parser.currentToken() == XContentParser.Token.START_OBJECT;
+        assert parser.currentToken() == XContentParser.Token.START_OBJECT : "expected token to be START_OBJECT but was " + parser.currentToken();
 
         RestTestSuite restTestSuite = new RestTestSuite(parseContext.getApi(), parseContext.getSuiteName());
 

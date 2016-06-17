@@ -21,11 +21,14 @@ package org.elasticsearch.search.aggregations.metrics;
 import org.apache.lucene.index.LeafReaderContext;
 import org.apache.lucene.search.Scorer;
 import org.elasticsearch.action.search.SearchResponse;
+import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.plugins.Plugin;
+import org.elasticsearch.plugins.ScriptPlugin;
 import org.elasticsearch.script.CompiledScript;
 import org.elasticsearch.script.ExecutableScript;
 import org.elasticsearch.script.LeafSearchScript;
 import org.elasticsearch.script.Script;
+import org.elasticsearch.script.ScriptEngineRegistry;
 import org.elasticsearch.script.ScriptEngineService;
 import org.elasticsearch.script.ScriptModule;
 import org.elasticsearch.script.ScriptService.ScriptType;
@@ -40,6 +43,7 @@ import java.io.IOException;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 import static org.elasticsearch.common.xcontent.XContentFactory.jsonBuilder;
@@ -83,12 +87,12 @@ public class ValueCountIT extends ESIntegTestCase {
                 .addAggregation(count("count").field("value"))
                 .execute().actionGet();
 
-        assertThat(searchResponse.getHits().getTotalHits(), equalTo(0l));
+        assertThat(searchResponse.getHits().getTotalHits(), equalTo(0L));
 
         ValueCount valueCount = searchResponse.getAggregations().get("count");
         assertThat(valueCount, notNullValue());
         assertThat(valueCount.getName(), equalTo("count"));
-        assertThat(valueCount.getValue(), equalTo(0l));
+        assertThat(valueCount.getValue(), equalTo(0L));
     }
 
     public void testSingleValuedField() throws Exception {
@@ -102,7 +106,7 @@ public class ValueCountIT extends ESIntegTestCase {
         ValueCount valueCount = searchResponse.getAggregations().get("count");
         assertThat(valueCount, notNullValue());
         assertThat(valueCount.getName(), equalTo("count"));
-        assertThat(valueCount.getValue(), equalTo(10l));
+        assertThat(valueCount.getValue(), equalTo(10L));
     }
 
     public void testSingleValuedFieldGetProperty() throws Exception {
@@ -114,14 +118,14 @@ public class ValueCountIT extends ESIntegTestCase {
         Global global = searchResponse.getAggregations().get("global");
         assertThat(global, notNullValue());
         assertThat(global.getName(), equalTo("global"));
-        assertThat(global.getDocCount(), equalTo(10l));
+        assertThat(global.getDocCount(), equalTo(10L));
         assertThat(global.getAggregations(), notNullValue());
         assertThat(global.getAggregations().asMap().size(), equalTo(1));
 
         ValueCount valueCount = global.getAggregations().get("count");
         assertThat(valueCount, notNullValue());
         assertThat(valueCount.getName(), equalTo("count"));
-        assertThat(valueCount.getValue(), equalTo(10l));
+        assertThat(valueCount.getValue(), equalTo(10L));
         assertThat((ValueCount) global.getProperty("count"), equalTo(valueCount));
         assertThat((double) global.getProperty("count.value"), equalTo(10d));
         assertThat((double) valueCount.getProperty("value"), equalTo(10d));
@@ -138,7 +142,7 @@ public class ValueCountIT extends ESIntegTestCase {
         ValueCount valueCount = searchResponse.getAggregations().get("count");
         assertThat(valueCount, notNullValue());
         assertThat(valueCount.getName(), equalTo("count"));
-        assertThat(valueCount.getValue(), equalTo(10l));
+        assertThat(valueCount.getValue(), equalTo(10L));
     }
 
     public void testMultiValuedField() throws Exception {
@@ -152,7 +156,7 @@ public class ValueCountIT extends ESIntegTestCase {
         ValueCount valueCount = searchResponse.getAggregations().get("count");
         assertThat(valueCount, notNullValue());
         assertThat(valueCount.getName(), equalTo("count"));
-        assertThat(valueCount.getValue(), equalTo(20l));
+        assertThat(valueCount.getValue(), equalTo(20L));
     }
 
     public void testSingleValuedScript() throws Exception {
@@ -164,7 +168,7 @@ public class ValueCountIT extends ESIntegTestCase {
         ValueCount valueCount = searchResponse.getAggregations().get("count");
         assertThat(valueCount, notNullValue());
         assertThat(valueCount.getName(), equalTo("count"));
-        assertThat(valueCount.getValue(), equalTo(10l));
+        assertThat(valueCount.getValue(), equalTo(10L));
     }
 
     public void testMultiValuedScript() throws Exception {
@@ -176,7 +180,7 @@ public class ValueCountIT extends ESIntegTestCase {
         ValueCount valueCount = searchResponse.getAggregations().get("count");
         assertThat(valueCount, notNullValue());
         assertThat(valueCount.getName(), equalTo("count"));
-        assertThat(valueCount.getValue(), equalTo(20l));
+        assertThat(valueCount.getValue(), equalTo(20L));
     }
 
     public void testSingleValuedScriptWithParams() throws Exception {
@@ -189,7 +193,7 @@ public class ValueCountIT extends ESIntegTestCase {
         ValueCount valueCount = searchResponse.getAggregations().get("count");
         assertThat(valueCount, notNullValue());
         assertThat(valueCount.getName(), equalTo("count"));
-        assertThat(valueCount.getValue(), equalTo(10l));
+        assertThat(valueCount.getValue(), equalTo(10L));
     }
 
     public void testMultiValuedScriptWithParams() throws Exception {
@@ -202,28 +206,17 @@ public class ValueCountIT extends ESIntegTestCase {
         ValueCount valueCount = searchResponse.getAggregations().get("count");
         assertThat(valueCount, notNullValue());
         assertThat(valueCount.getName(), equalTo("count"));
-        assertThat(valueCount.getValue(), equalTo(20l));
+        assertThat(valueCount.getValue(), equalTo(20L));
     }
 
     /**
      * Mock plugin for the {@link FieldValueScriptEngine}
      */
-    public static class FieldValueScriptPlugin extends Plugin {
-
+    public static class FieldValueScriptPlugin extends Plugin implements ScriptPlugin {
         @Override
-        public String name() {
-            return FieldValueScriptEngine.NAME;
+        public ScriptEngineService getScriptEngineService(Settings settings) {
+            return new FieldValueScriptEngine();
         }
-
-        @Override
-        public String description() {
-            return "Mock script engine for " + ValueCountIT.class;
-        }
-
-        public void onModule(ScriptModule module) {
-            module.addScriptEngine(FieldValueScriptEngine.class);
-        }
-
     }
 
     /**
@@ -238,23 +231,18 @@ public class ValueCountIT extends ESIntegTestCase {
         }
 
         @Override
-        public String[] types() {
-            return new String[] { NAME };
+        public String getType() {
+            return NAME;
         }
 
         @Override
-        public String[] extensions() {
-            return types();
+        public String getExtension() {
+            return NAME;
         }
 
         @Override
-        public boolean sandboxed() {
-            return true;
-        }
-
-        @Override
-        public Object compile(String script, Map<String, String> params) {
-            return script;
+        public Object compile(String scriptName, String scriptSource, Map<String, String> params) {
+            return scriptSource;
         }
 
         @Override
@@ -317,11 +305,6 @@ public class ValueCountIT extends ESIntegTestCase {
                         }
 
                         @Override
-                        public float runAsFloat() {
-                            throw new UnsupportedOperationException();
-                        }
-
-                        @Override
                         public double runAsDouble() {
                             throw new UnsupportedOperationException();
                         }
@@ -337,6 +320,11 @@ public class ValueCountIT extends ESIntegTestCase {
 
         @Override
         public void scriptRemoved(CompiledScript script) {
+        }
+
+        @Override
+        public boolean isInlineScriptEnabled() {
+            return true;
         }
     }
 }

@@ -26,20 +26,17 @@ import org.apache.lucene.util.Accountable;
 import org.apache.lucene.util.IOUtils;
 import org.apache.lucene.util.RamUsageEstimator;
 import org.elasticsearch.ElasticsearchException;
-import org.elasticsearch.common.Strings;
+import org.elasticsearch.common.UUIDs;
 import org.elasticsearch.common.bytes.BytesArray;
 import org.elasticsearch.common.bytes.BytesReference;
 import org.elasticsearch.common.bytes.ReleasablePagedBytesReference;
 import org.elasticsearch.common.io.stream.ReleasableBytesStreamOutput;
 import org.elasticsearch.common.io.stream.StreamInput;
 import org.elasticsearch.common.io.stream.StreamOutput;
-import org.elasticsearch.common.io.stream.Streamable;
-import org.elasticsearch.common.lease.Releasable;
+import org.elasticsearch.common.io.stream.Writeable;
 import org.elasticsearch.common.lease.Releasables;
 import org.elasticsearch.common.lucene.uid.Versions;
-import org.elasticsearch.common.unit.ByteSizeValue;
 import org.elasticsearch.common.util.BigArrays;
-import org.elasticsearch.common.util.Callback;
 import org.elasticsearch.common.util.concurrent.ConcurrentCollections;
 import org.elasticsearch.common.util.concurrent.FutureUtils;
 import org.elasticsearch.common.util.concurrent.ReleasableLock;
@@ -51,8 +48,8 @@ import org.elasticsearch.index.shard.IndexShardComponent;
 import java.io.Closeable;
 import java.io.EOFException;
 import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
-import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
@@ -68,6 +65,8 @@ import java.util.concurrent.locks.ReadWriteLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 /**
  * A Translog is a per index shard component that records all non-committed index operations in a durable manner.
@@ -84,7 +83,7 @@ import java.util.regex.Pattern;
  * </p>
  * <p>
  * When a translog is opened the checkpoint is use to retrieve the latest translog file generation and subsequently to open the last written file to recovery operations.
- * The {@link org.elasticsearch.index.translog.Translog.TranslogGeneration} on {@link TranslogConfig#getTranslogGeneration()} given when the translog is opened is compared against
+ * The {@link org.elasticsearch.index.translog.Translog.TranslogGeneration}, given when the translog is opened / constructed is compared against
  * the latest generation and all consecutive translog files singe the given generation and the last generation in the checkpoint will be recovered and preserved until the next
  * generation is committed using {@link Translog#commit()}. In the common case the translog file generation in the checkpoint and the generation passed to the translog on creation are
  * the same. The only situation when they can be different is when an actual translog commit fails in between {@link Translog#prepareCommit()} and {@link Translog#commit()}. In such a case
@@ -98,7 +97,7 @@ public class Translog extends AbstractIndexShardComponent implements IndexShardC
     /*
      * TODO
      *  - we might need something like a deletion policy to hold on to more than one translog eventually (I think sequence IDs needs this) but we can refactor as we go
-     *  - use a simple BufferedOuputStream to write stuff and fold BufferedTranslogWriter into it's super class... the tricky bit is we need to be able to do random access reads even from the buffer
+     *  - use a simple BufferedOutputStream to write stuff and fold BufferedTranslogWriter into it's super class... the tricky bit is we need to be able to do random access reads even from the buffer
      *  - we need random exception on the FileSystem API tests for all this.
      *  - we need to page align the last write before we sync, we can take advantage of ensureSynced for this since we might have already fsynced far enough
      */
@@ -111,45 +110,45 @@ public class Translog extends AbstractIndexShardComponent implements IndexShardC
 
     static final Pattern PARSE_STRICT_ID_PATTERN = Pattern.compile("^" + TRANSLOG_FILE_PREFIX + "(\\d+)(\\.tlog)$");
 
-    private final List<ImmutableTranslogReader> recoveredTranslogs;
+    // the list of translog readers is guaranteed to be in order of translog generation
+    private final List<TranslogReader> readers = new ArrayList<>();
     private volatile ScheduledFuture<?> syncScheduler;
     // this is a concurrent set and is not protected by any of the locks. The main reason
-    // is that is being accessed by two separate classes (additions & reading are done by FsTranslog, remove by FsView when closed)
+    // is that is being accessed by two separate classes (additions & reading are done by Translog, remove by View when closed)
     private final Set<View> outstandingViews = ConcurrentCollections.newConcurrentSet();
     private BigArrays bigArrays;
     protected final ReleasableLock readLock;
     protected final ReleasableLock writeLock;
     private final Path location;
     private TranslogWriter current;
-    private volatile ImmutableTranslogReader currentCommittingTranslog;
-    private volatile long lastCommittedTranslogFileGeneration = -1; // -1 is safe as it will not cause an translog deletion.
+
+    private final static long NOT_SET_GENERATION = -1; // -1 is safe as it will not cause a translog deletion.
+
+    private volatile long currentCommittingGeneration = NOT_SET_GENERATION;
+    private volatile long lastCommittedTranslogFileGeneration = NOT_SET_GENERATION;
     private final AtomicBoolean closed = new AtomicBoolean();
     private final TranslogConfig config;
     private final String translogUUID;
-    private Callback<View> onViewClose = new Callback<View>() {
-        @Override
-        public void handle(View view) {
-            logger.trace("closing view starting at translog [{}]", view.minTranslogGeneration());
-            boolean removed = outstandingViews.remove(view);
-            assert removed : "View was never set but was supposed to be removed";
-        }
-    };
-
 
     /**
      * Creates a new Translog instance. This method will create a new transaction log unless the given {@link TranslogConfig} has
      * a non-null {@link org.elasticsearch.index.translog.Translog.TranslogGeneration}. If the generation is null this method
      * us destructive and will delete all files in the translog path given.
      *
+     * @param config the configuration of this translog
+     * @param translogGeneration the translog generation to open. If this is <code>null</code> a new translog is created. If non-null
+     * the translog tries to open the given translog generation. The generation is treated as the last generation referenced
+     * form already committed data. This means all operations that have not yet been committed should be in the translog
+     * file referenced by this generation. The translog creation will fail if this generation can't be opened.
+     *
      * @see TranslogConfig#getTranslogPath()
+     *
      */
-    public Translog(TranslogConfig config) throws IOException {
+    public Translog(TranslogConfig config, TranslogGeneration translogGeneration) throws IOException {
         super(config.getShardId(), config.getIndexSettings());
         this.config = config;
-        TranslogGeneration translogGeneration = config.getTranslogGeneration();
-
         if (translogGeneration == null || translogGeneration.translogUUID == null) { // legacy case
-            translogUUID = Strings.randomBase64UUID();
+            translogUUID = UUIDs.randomBase64UUID();
         } else {
             translogUUID = translogGeneration.translogUUID;
         }
@@ -163,14 +162,39 @@ public class Translog extends AbstractIndexShardComponent implements IndexShardC
         try {
             if (translogGeneration != null) {
                 final Checkpoint checkpoint = readCheckpoint();
-                this.recoveredTranslogs = recoverFromFiles(translogGeneration, checkpoint);
-                if (recoveredTranslogs.isEmpty()) {
+                final Path nextTranslogFile = location.resolve(getFilename(checkpoint.generation + 1));
+                final Path currentCheckpointFile = location.resolve(getCommitCheckpointFileName(checkpoint.generation));
+                // this is special handling for error condition when we create a new writer but we fail to bake
+                // the newly written file (generation+1) into the checkpoint. This is still a valid state
+                // we just need to cleanup before we continue
+                // we hit this before and then blindly deleted the new generation even though we managed to bake it in and then hit this:
+                // https://discuss.elastic.co/t/cannot-recover-index-because-of-missing-tanslog-files/38336 as an example
+                //
+                // For this to happen we must have already copied the translog.ckp file into translog-gen.ckp so we first check if that file exists
+                // if not we don't even try to clean it up and wait until we fail creating it
+                assert Files.exists(nextTranslogFile) == false || Files.size(nextTranslogFile) <= TranslogWriter.getHeaderLength(translogUUID) : "unexpected translog file: [" + nextTranslogFile + "]";
+                if (Files.exists(currentCheckpointFile) // current checkpoint is already copied
+                        && Files.deleteIfExists(nextTranslogFile)) { // delete it and log a warning
+                    logger.warn("deleted previously created, but not yet committed, next generation [{}]. This can happen due to a tragic exception when creating a new generation", nextTranslogFile.getFileName());
+                }
+                this.readers.addAll(recoverFromFiles(translogGeneration, checkpoint));
+                if (readers.isEmpty()) {
                     throw new IllegalStateException("at least one reader must be recovered");
                 }
-                current = createWriter(checkpoint.generation + 1);
-                this.lastCommittedTranslogFileGeneration = translogGeneration.translogFileGeneration;
+                boolean success = false;
+                try {
+                    current = createWriter(checkpoint.generation + 1);
+                    this.lastCommittedTranslogFileGeneration = translogGeneration.translogFileGeneration;
+                    success = true;
+                } finally {
+                    // we have to close all the recovered ones otherwise we leak file handles here
+                    // for instance if we have a lot of tlog and we can't create the writer we keep on holding
+                    // on to all the uncommitted tlog files if we don't close
+                    if (success == false) {
+                        IOUtils.closeWhileHandlingException(readers);
+                    }
+                }
             } else {
-                this.recoveredTranslogs = Collections.emptyList();
                 IOUtils.rm(location);
                 logger.debug("wipe translog location - creating new translog");
                 Files.createDirectories(location);
@@ -178,21 +202,22 @@ public class Translog extends AbstractIndexShardComponent implements IndexShardC
                 Checkpoint checkpoint = new Checkpoint(0, 0, generation);
                 Checkpoint.write(location.resolve(CHECKPOINT_FILE_NAME), checkpoint, StandardOpenOption.WRITE, StandardOpenOption.CREATE_NEW);
                 current = createWriter(generation);
-                this.lastCommittedTranslogFileGeneration = -1; // playing safe
+                this.lastCommittedTranslogFileGeneration = NOT_SET_GENERATION;
 
             }
             // now that we know which files are there, create a new current one.
         } catch (Throwable t) {
             // close the opened translog files if we fail to create a new translog...
-            IOUtils.closeWhileHandlingException(currentCommittingTranslog, current);
+            IOUtils.closeWhileHandlingException(current);
+            IOUtils.closeWhileHandlingException(readers);
             throw t;
         }
     }
 
     /** recover all translog files found on disk */
-    private final ArrayList<ImmutableTranslogReader> recoverFromFiles(TranslogGeneration translogGeneration, Checkpoint checkpoint) throws IOException {
+    private final ArrayList<TranslogReader> recoverFromFiles(TranslogGeneration translogGeneration, Checkpoint checkpoint) throws IOException {
         boolean success = false;
-        ArrayList<ImmutableTranslogReader> foundTranslogs = new ArrayList<>();
+        ArrayList<TranslogReader> foundTranslogs = new ArrayList<>();
         final Path tempFile = Files.createTempFile(location, TRANSLOG_FILE_PREFIX, TRANSLOG_FILE_SUFFIX); // a temp file to copy checkpoint to - note it must be in on the same FS otherwise atomic move won't work
         boolean tempFileRenamed = false;
         try (ReleasableLock lock = writeLock.acquire()) {
@@ -203,7 +228,7 @@ public class Translog extends AbstractIndexShardComponent implements IndexShardC
                 if (Files.exists(committedTranslogFile) == false) {
                     throw new IllegalStateException("translog file doesn't exist with generation: " + i + " lastCommitted: " + lastCommittedTranslogFileGeneration + " checkpoint: " + checkpoint.generation + " - translog ids must be consecutive");
                 }
-                final ImmutableTranslogReader reader = openReader(committedTranslogFile, Checkpoint.read(location.resolve(getCommitCheckpointFileName(i))));
+                final TranslogReader reader = openReader(committedTranslogFile, Checkpoint.read(location.resolve(getCommitCheckpointFileName(i))));
                 foundTranslogs.add(reader);
                 logger.debug("recovered local translog from checkpoint {}", checkpoint);
             }
@@ -240,17 +265,11 @@ public class Translog extends AbstractIndexShardComponent implements IndexShardC
         return foundTranslogs;
     }
 
-    ImmutableTranslogReader openReader(Path path, Checkpoint checkpoint) throws IOException {
-        final long generation;
-        try {
-            generation = parseIdFromFileName(path);
-        } catch (IllegalArgumentException ex) {
-            throw new TranslogException(shardId, "failed to parse generation from file name matching pattern " + path, ex);
-        }
+    TranslogReader openReader(Path path, Checkpoint checkpoint) throws IOException {
         FileChannel channel = FileChannel.open(path, StandardOpenOption.READ);
         try {
-            final ChannelReference raf = new ChannelReference(path, generation, channel, new OnCloseRunnable());
-            ImmutableTranslogReader reader = ImmutableTranslogReader.open(raf, checkpoint, translogUUID);
+            assert Translog.parseIdFromFileName(path) == checkpoint.generation : "expected generation: " + Translog.parseIdFromFileName(path) + " but got: " + checkpoint.generation;
+            TranslogReader reader = TranslogReader.open(channel, path, checkpoint, translogUUID);
             channel = null;
             return reader;
         } finally {
@@ -288,12 +307,7 @@ public class Translog extends AbstractIndexShardComponent implements IndexShardC
                 try {
                     current.sync();
                 } finally {
-                    try {
-                        IOUtils.close(current, currentCommittingTranslog);
-                    } finally {
-                        IOUtils.close(recoveredTranslogs);
-                        recoveredTranslogs.clear();
-                    }
+                    closeFilesIfNoPendingViews();
                 }
             } finally {
                 FutureUtils.cancel(syncScheduler);
@@ -322,41 +336,49 @@ public class Translog extends AbstractIndexShardComponent implements IndexShardC
 
     /**
      * Returns the number of operations in the transaction files that aren't committed to lucene..
-     * Note: may return -1 if unknown
      */
     public int totalOperations() {
-        int ops = 0;
-        try (ReleasableLock lock = readLock.acquire()) {
-            ops += current.totalOperations();
-            if (currentCommittingTranslog != null) {
-                int tops = currentCommittingTranslog.totalOperations();
-                assert tops != TranslogReader.UNKNOWN_OP_COUNT;
-                assert tops >= 0;
-                ops += tops;
-            }
-        }
-        return ops;
+        return totalOperations(lastCommittedTranslogFileGeneration);
     }
 
     /**
      * Returns the size in bytes of the translog files that aren't committed to lucene.
      */
     public long sizeInBytes() {
-        long size = 0;
-        try (ReleasableLock lock = readLock.acquire()) {
-            size += current.sizeInBytes();
-            if (currentCommittingTranslog != null) {
-                size += currentCommittingTranslog.sizeInBytes();
-            }
+        return sizeInBytes(lastCommittedTranslogFileGeneration);
+    }
+
+    /**
+     * Returns the number of operations in the transaction files that aren't committed to lucene..
+     */
+    private int totalOperations(long minGeneration) {
+        try (ReleasableLock ignored = readLock.acquire()) {
+            ensureOpen();
+            return Stream.concat(readers.stream(), Stream.of(current))
+                    .filter(r -> r.getGeneration() >= minGeneration)
+                    .mapToInt(BaseTranslogReader::totalOperations)
+                    .sum();
         }
-        return size;
+    }
+
+    /**
+     * Returns the size in bytes of the translog files that aren't committed to lucene.
+     */
+    private long sizeInBytes(long minGeneration) {
+        try (ReleasableLock ignored = readLock.acquire()) {
+            ensureOpen();
+            return Stream.concat(readers.stream(), Stream.of(current))
+                    .filter(r -> r.getGeneration() >= minGeneration)
+                    .mapToLong(BaseTranslogReader::sizeInBytes)
+                    .sum();
+        }
     }
 
 
     TranslogWriter createWriter(long fileGeneration) throws IOException {
         TranslogWriter newFile;
         try {
-            newFile = TranslogWriter.create(shardId, translogUUID, fileGeneration, location.resolve(getFilename(fileGeneration)), new OnCloseRunnable(), getChannelFactory(), config.getBufferSize());
+            newFile = TranslogWriter.create(shardId, translogUUID, fileGeneration, location.resolve(getFilename(fileGeneration)), getChannelFactory(), config.getBufferSize());
         } catch (IOException e) {
             throw new TranslogException(shardId, "failed to create new translog file", e);
         }
@@ -371,12 +393,12 @@ public class Translog extends AbstractIndexShardComponent implements IndexShardC
      */
     public Translog.Operation read(Location location) {
         try (ReleasableLock lock = readLock.acquire()) {
-            final TranslogReader reader;
+            final BaseTranslogReader reader;
             final long currentGeneration = current.getGeneration();
             if (currentGeneration == location.generation) {
                 reader = current;
-            } else if (currentCommittingTranslog != null && currentCommittingTranslog.getGeneration() == location.generation) {
-                reader = currentCommittingTranslog;
+            } else if (readers.isEmpty() == false && readers.get(readers.size() - 1).getGeneration() == location.generation) {
+                reader = readers.get(readers.size() - 1);
             } else if (currentGeneration < location.generation) {
                 throw new IllegalStateException("location generation [" + location.generation + "] is greater than the current generation [" + currentGeneration + "]");
             } else {
@@ -400,10 +422,10 @@ public class Translog extends AbstractIndexShardComponent implements IndexShardC
         try {
             final BufferedChecksumStreamOutput checksumStreamOutput = new BufferedChecksumStreamOutput(out);
             final long start = out.position();
-            out.skip(RamUsageEstimator.NUM_BYTES_INT);
+            out.skip(Integer.BYTES);
             writeOperationNoSize(checksumStreamOutput, operation);
             final long end = out.position();
-            final int operationSize = (int) (end - RamUsageEstimator.NUM_BYTES_INT - start);
+            final int operationSize = (int) (end - Integer.BYTES - start);
             out.seek(start);
             out.writeInt(operationSize);
             out.seek(end);
@@ -411,10 +433,7 @@ public class Translog extends AbstractIndexShardComponent implements IndexShardC
             try (ReleasableLock lock = readLock.acquire()) {
                 ensureOpen();
                 Location location = current.add(bytes);
-                if (config.isSyncOnEachOperation()) {
-                    current.sync();
-                }
-                assert current.assertBytesAtLocation(location, bytes);
+                assert assertBytesAtLocation(location, bytes);
                 return location;
             }
         } catch (AlreadyClosedException | IOException ex) {
@@ -429,37 +448,42 @@ public class Translog extends AbstractIndexShardComponent implements IndexShardC
     }
 
     /**
+     * The a {@linkplain Location} that will sort after the {@linkplain Location} returned by the last write but before any locations which
+     * can be returned by the next write.
+     */
+    public Location getLastWriteLocation() {
+        try (ReleasableLock lock = readLock.acquire()) {
+            /*
+             * We use position = current - 1 and size = Integer.MAX_VALUE here instead of position current and size = 0 for two reasons:
+             * 1. Translog.Location's compareTo doesn't actually pay attention to size even though it's equals method does.
+             * 2. It feels more right to return a *position* that is before the next write's position rather than rely on the size.
+             */
+            return new Location(current.generation, current.sizeInBytes() - 1, Integer.MAX_VALUE);
+        }
+    }
+
+    boolean assertBytesAtLocation(Translog.Location location, BytesReference expectedBytes) throws IOException {
+        // tests can override this
+        ByteBuffer buffer = ByteBuffer.allocate(location.size);
+        current.readBytes(buffer, location.translogLocation);
+        return new BytesArray(buffer.array()).equals(expectedBytes);
+    }
+
+    /**
      * Snapshots the current transaction log allowing to safely iterate over the snapshot.
      * Snapshots are fixed in time and will not be updated with future operations.
      */
     public Snapshot newSnapshot() {
-        ensureOpen();
-        try (ReleasableLock lock = readLock.acquire()) {
-            ArrayList<TranslogReader> toOpen = new ArrayList<>();
-            toOpen.addAll(recoveredTranslogs);
-            if (currentCommittingTranslog != null) {
-                toOpen.add(currentCommittingTranslog);
-            }
-            toOpen.add(current);
-            return createSnapshot(toOpen.toArray(new TranslogReader[toOpen.size()]));
-        }
+        return createSnapshot(Long.MIN_VALUE);
     }
 
-    private static Snapshot createSnapshot(TranslogReader... translogs) {
-        Snapshot[] snapshots = new Snapshot[translogs.length];
-        boolean success = false;
-        try {
-            for (int i = 0; i < translogs.length; i++) {
-                snapshots[i] = translogs[i].newSnapshot();
-            }
-
-            Snapshot snapshot = new MultiSnapshot(snapshots);
-            success = true;
-            return snapshot;
-        } finally {
-            if (success == false) {
-                Releasables.close(snapshots);
-            }
+    private Snapshot createSnapshot(long minGeneration) {
+        try (ReleasableLock ignored = readLock.acquire()) {
+            ensureOpen();
+            Snapshot[] snapshots = Stream.concat(readers.stream(), Stream.of(current))
+                    .filter(reader -> reader.getGeneration() >= minGeneration)
+                    .map(BaseTranslogReader::newSnapshot).toArray(Snapshot[]::new);
+            return new MultiSnapshot(snapshots);
         }
     }
 
@@ -468,25 +492,11 @@ public class Translog extends AbstractIndexShardComponent implements IndexShardC
      * while receiving future ones as well
      */
     public Translog.View newView() {
-        // we need to acquire the read lock to make sure no new translog is created
-        // and will be missed by the view we're making
         try (ReleasableLock lock = readLock.acquire()) {
-            ArrayList<TranslogReader> translogs = new ArrayList<>();
-            try {
-                if (currentCommittingTranslog != null) {
-                    translogs.add(currentCommittingTranslog.clone());
-                }
-                translogs.add(current.newReaderFromWriter());
-                View view = new View(translogs, onViewClose);
-                // this is safe as we know that no new translog is being made at the moment
-                // (we hold a read lock) and the view will be notified of any future one
-                outstandingViews.add(view);
-                translogs.clear();
-                return view;
-            } finally {
-                // close if anything happend and we didn't reach the clear
-                IOUtils.closeWhileHandlingException(translogs);
-            }
+            ensureOpen();
+            View view = new View(lastCommittedTranslogFileGeneration);
+            outstandingViews.add(view);
+            return view;
         }
     }
 
@@ -527,7 +537,7 @@ public class Translog extends AbstractIndexShardComponent implements IndexShardC
      */
     public boolean ensureSynced(Location location) throws IOException {
         try (ReleasableLock lock = readLock.acquire()) {
-            if (location.generation == current.generation) { // if we have a new one it's already synced
+            if (location.generation == current.getGeneration()) { // if we have a new one it's already synced
                 ensureOpen();
                 return current.syncUpTo(location.translogLocation + location.size);
             }
@@ -542,7 +552,11 @@ public class Translog extends AbstractIndexShardComponent implements IndexShardC
         if (current.getTragicException() != null) {
             try {
                 close();
+            } catch (AlreadyClosedException inner) {
+                // don't do anything in this case. The AlreadyClosedException comes from TranslogWriter and we should not add it as suppressed because
+                // will contain the Exception ex as cause. See also https://github.com/elastic/elasticsearch/issues/15941
             } catch (Exception inner) {
+                assert (ex != inner.getCause());
                 ex.addSuppressed(inner);
             }
         }
@@ -566,150 +580,66 @@ public class Translog extends AbstractIndexShardComponent implements IndexShardC
         return config;
     }
 
-
-    private final class OnCloseRunnable implements Callback<ChannelReference> {
-        @Override
-        public void handle(ChannelReference channelReference) {
-            if (isReferencedGeneration(channelReference.getGeneration()) == false) {
-                Path translogPath = channelReference.getPath();
-                assert channelReference.getPath().getParent().equals(location) : "translog files must be in the location folder: " + location + " but was: " + translogPath;
-                // if the given translogPath is not the current we can safely delete the file since all references are released
-                logger.trace("delete translog file - not referenced and not current anymore {}", translogPath);
-                IOUtils.deleteFilesIgnoringExceptions(translogPath);
-                IOUtils.deleteFilesIgnoringExceptions(translogPath.resolveSibling(getCommitCheckpointFileName(channelReference.getGeneration())));
-
-            }
-            try (DirectoryStream<Path> stream = Files.newDirectoryStream(location)) {
-                for (Path path : stream) {
-                    Matcher matcher = PARSE_STRICT_ID_PATTERN.matcher(path.getFileName().toString());
-                    if (matcher.matches()) {
-                        long generation = Long.parseLong(matcher.group(1));
-                        if (isReferencedGeneration(generation) == false) {
-                            logger.trace("delete translog file - not referenced and not current anymore {}", path);
-                            IOUtils.deleteFilesIgnoringExceptions(path);
-                            IOUtils.deleteFilesIgnoringExceptions(path.resolveSibling(getCommitCheckpointFileName(channelReference.getGeneration())));
-                        }
-                    }
-                }
-            } catch (IOException e) {
-                logger.warn("failed to delete unreferenced translog files", e);
-            }
-        }
-    }
-
     /**
      * a view into the translog, capturing all translog file at the moment of creation
      * and updated with any future translog.
      */
-    public static final class View implements Closeable {
-        public static final Translog.View EMPTY_VIEW = new View(Collections.emptyList(), null);
+    /**
+     * a view into the translog, capturing all translog file at the moment of creation
+     * and updated with any future translog.
+     */
+    public class View implements Closeable {
 
-        boolean closed;
-        // last in this list is always FsTranslog.current
-        final List<TranslogReader> orderedTranslogs;
-        private final Callback<View> onClose;
+        AtomicBoolean closed = new AtomicBoolean();
+        final long minGeneration;
 
-        View(List<TranslogReader> orderedTranslogs, Callback<View> onClose) {
-            // clone so we can safely mutate..
-            this.orderedTranslogs = new ArrayList<>(orderedTranslogs);
-            this.onClose = onClose;
-        }
-
-        /**
-         * Called by the parent class when ever the current translog changes
-         *
-         * @param oldCurrent a new read only reader for the old current (should replace the previous reference)
-         * @param newCurrent a reader into the new current.
-         */
-        synchronized void onNewTranslog(TranslogReader oldCurrent, TranslogReader newCurrent) throws IOException {
-            // even though the close method removes this view from outstandingViews, there is no synchronisation in place
-            // between that operation and an ongoing addition of a new translog, already having an iterator.
-            // As such, this method can be called despite of the fact that we are closed. We need to check and ignore.
-            if (closed) {
-                // we have to close the new references created for as as we will not hold them
-                IOUtils.close(oldCurrent, newCurrent);
-                return;
-            }
-            orderedTranslogs.remove(orderedTranslogs.size() - 1).close();
-            orderedTranslogs.add(oldCurrent);
-            orderedTranslogs.add(newCurrent);
+        View(long minGeneration) {
+            this.minGeneration = minGeneration;
         }
 
         /** this smallest translog generation in this view */
-        public synchronized long minTranslogGeneration() {
-            ensureOpen();
-            return orderedTranslogs.get(0).getGeneration();
+        public long minTranslogGeneration() {
+            return minGeneration;
         }
 
         /**
          * The total number of operations in the view.
          */
-        public synchronized int totalOperations() {
-            int ops = 0;
-            for (TranslogReader translog : orderedTranslogs) {
-                int tops = translog.totalOperations();
-                if (tops == TranslogReader.UNKNOWN_OP_COUNT) {
-                    return -1;
-                }
-                assert tops >= 0;
-                ops += tops;
-            }
-            return ops;
+        public int totalOperations() {
+            return Translog.this.totalOperations(minGeneration);
         }
 
         /**
          * Returns the size in bytes of the files behind the view.
          */
-        public synchronized long sizeInBytes() {
-            long size = 0;
-            for (TranslogReader translog : orderedTranslogs) {
-                size += translog.sizeInBytes();
-            }
-            return size;
+        public long sizeInBytes() {
+            return Translog.this.sizeInBytes(minGeneration);
         }
 
         /** create a snapshot from this view */
-        public synchronized Snapshot snapshot() {
+        public Snapshot snapshot() {
             ensureOpen();
-            return createSnapshot(orderedTranslogs.toArray(new TranslogReader[orderedTranslogs.size()]));
+            return Translog.this.createSnapshot(minGeneration);
         }
 
-
         void ensureOpen() {
-            if (closed) {
-                throw new ElasticsearchException("View is already closed");
+            if (closed.get()) {
+                throw new AlreadyClosedException("View is already closed");
             }
         }
 
         @Override
-        public void close() {
-            final List<TranslogReader> toClose = new ArrayList<>();
-            try {
-                synchronized (this) {
-                    if (closed == false) {
-                        try {
-                            if (onClose != null) {
-                                onClose.handle(this);
-                            }
-                        } finally {
-                            closed = true;
-                            toClose.addAll(orderedTranslogs);
-                            orderedTranslogs.clear();
-                        }
-                    }
-                }
-            } finally {
-                try {
-                    // Close out of lock to prevent deadlocks between channel close which checks for
-                    // references in InternalChannelReference.closeInternal (waiting on a read lock)
-                    // and other FsTranslog#newTranslog calling FsView.onNewTranslog (while having a write lock)
-                    IOUtils.close(toClose);
-                } catch (Exception e) {
-                    throw new ElasticsearchException("failed to close view", e);
-                }
+        public void close() throws IOException {
+            if (closed.getAndSet(true) == false) {
+                logger.trace("closing view starting at translog [{}]", minTranslogGeneration());
+                boolean removed = outstandingViews.remove(this);
+                assert removed : "View was never set but was supposed to be removed";
+                trimUnreferencedReaders();
+                closeFilesIfNoPendingViews();
             }
         }
     }
+
 
     public static class Location implements Accountable, Comparable<Location> {
 
@@ -725,7 +655,7 @@ public class Translog extends AbstractIndexShardComponent implements IndexShardC
 
         @Override
         public long ramBytesUsed() {
-            return RamUsageEstimator.NUM_BYTES_OBJECT_HEADER + 2 * RamUsageEstimator.NUM_BYTES_LONG + RamUsageEstimator.NUM_BYTES_INT;
+            return RamUsageEstimator.NUM_BYTES_OBJECT_HEADER + 2 * Long.BYTES + Integer.BYTES;
         }
 
         @Override
@@ -779,12 +709,12 @@ public class Translog extends AbstractIndexShardComponent implements IndexShardC
     /**
      * A snapshot of the transaction log, allows to iterate over all the transaction log operations.
      */
-    public interface Snapshot extends Releasable {
+    public interface Snapshot {
 
         /**
          * The total number of operations in the translog.
          */
-        int estimatedTotalOperations();
+        int totalOperations();
 
         /**
          * Returns the next operation in the snapshot or <code>null</code> if we reached the end.
@@ -797,7 +727,7 @@ public class Translog extends AbstractIndexShardComponent implements IndexShardC
      * A generic interface representing an operation performed on the transaction log.
      * Each is associated with a type.
      */
-    public interface Operation extends Streamable {
+    public interface Operation extends Writeable {
         enum Type {
             @Deprecated
             CREATE((byte) 1),
@@ -806,7 +736,7 @@ public class Translog extends AbstractIndexShardComponent implements IndexShardC
 
             private final byte id;
 
-            private Type(byte id) {
+            Type(byte id) {
                 this.id = id;
             }
 
@@ -834,6 +764,33 @@ public class Translog extends AbstractIndexShardComponent implements IndexShardC
 
         Source getSource();
 
+        /**
+         * Reads the type and the operation from the given stream. The operatino must be written with
+         * {@link #writeType(Operation, StreamOutput)}
+         */
+        static Operation readType(StreamInput input) throws IOException {
+            Translog.Operation.Type type = Translog.Operation.Type.fromId(input.readByte());
+            switch (type) {
+                case CREATE:
+                    // the deserialization logic in Index was identical to that of Create when create was deprecated
+                    return new Index(input);
+                case DELETE:
+                    return new Translog.Delete(input);
+                case INDEX:
+                    return new Index(input);
+                default:
+                    throw new IOException("No type for [" + type + "]");
+            }
+        }
+
+        /**
+         * Writes the type and translog operation to the given stream
+         */
+        static void writeType(Translog.Operation operation, StreamOutput output) throws IOException {
+            output.writeByte(operation.opType().id());
+            operation.writeTo(output);
+        }
+
     }
 
     public static class Source {
@@ -853,19 +810,30 @@ public class Translog extends AbstractIndexShardComponent implements IndexShardC
     }
 
     public static class Index implements Operation {
-        public static final int SERIALIZATION_FORMAT = 6;
+        public static final int SERIALIZATION_FORMAT = 6; // since 2.0-beta1 and 1.1
+        private final String id;
+        private final String type;
+        private final long version;
+        private final VersionType versionType;
+        private final BytesReference source;
+        private final String routing;
+        private final String parent;
+        private final long timestamp;
+        private final long ttl;
 
-        private String id;
-        private String type;
-        private long version = Versions.MATCH_ANY;
-        private VersionType versionType = VersionType.INTERNAL;
-        private BytesReference source;
-        private String routing;
-        private String parent;
-        private long timestamp;
-        private long ttl;
-
-        public Index() {
+        public Index(StreamInput in) throws IOException {
+            final int format = in.readVInt(); // SERIALIZATION_FORMAT
+            assert format == SERIALIZATION_FORMAT : "format was: " + format;
+            id = in.readString();
+            type = in.readString();
+            source = in.readBytesReference();
+            routing = in.readOptionalString();
+            parent = in.readOptionalString();
+            this.version = in.readLong();
+            this.timestamp = in.readLong();
+            this.ttl = in.readLong();
+            this.versionType = VersionType.fromValue(in.readByte());
+            assert versionType.validateVersionForWrites(this.version);
         }
 
         public Index(Engine.Index index) {
@@ -884,6 +852,12 @@ public class Translog extends AbstractIndexShardComponent implements IndexShardC
             this.type = type;
             this.id = id;
             this.source = new BytesArray(source);
+            version = Versions.MATCH_ANY;
+            versionType = VersionType.INTERNAL;
+            routing = null;
+            parent = null;
+            timestamp = 0;
+            ttl = 0;
         }
 
         @Override
@@ -938,59 +912,13 @@ public class Translog extends AbstractIndexShardComponent implements IndexShardC
         }
 
         @Override
-        public void readFrom(StreamInput in) throws IOException {
-            int version = in.readVInt(); // version
-            id = in.readString();
-            type = in.readString();
-            source = in.readBytesReference();
-            try {
-                if (version >= 1) {
-                    if (in.readBoolean()) {
-                        routing = in.readString();
-                    }
-                }
-                if (version >= 2) {
-                    if (in.readBoolean()) {
-                        parent = in.readString();
-                    }
-                }
-                if (version >= 3) {
-                    this.version = in.readLong();
-                }
-                if (version >= 4) {
-                    this.timestamp = in.readLong();
-                }
-                if (version >= 5) {
-                    this.ttl = in.readLong();
-                }
-                if (version >= 6) {
-                    this.versionType = VersionType.fromValue(in.readByte());
-                }
-            } catch (Exception e) {
-                throw new ElasticsearchException("failed to read [" + type + "][" + id + "]", e);
-            }
-
-            assert versionType.validateVersionForWrites(version);
-        }
-
-        @Override
         public void writeTo(StreamOutput out) throws IOException {
             out.writeVInt(SERIALIZATION_FORMAT);
             out.writeString(id);
             out.writeString(type);
             out.writeBytesReference(source);
-            if (routing == null) {
-                out.writeBoolean(false);
-            } else {
-                out.writeBoolean(true);
-                out.writeString(routing);
-            }
-            if (parent == null) {
-                out.writeBoolean(false);
-            } else {
-                out.writeBoolean(true);
-                out.writeString(parent);
-            }
+            out.writeOptionalString(routing);
+            out.writeOptionalString(parent);
             out.writeLong(version);
             out.writeLong(timestamp);
             out.writeLong(ttl);
@@ -1015,7 +943,7 @@ public class Translog extends AbstractIndexShardComponent implements IndexShardC
                     type.equals(index.type) == false ||
                     versionType != index.versionType ||
                     source.equals(index.source) == false) {
-                return false;
+                    return false;
             }
             if (routing != null ? !routing.equals(index.routing) : index.routing != null) {
                 return false;
@@ -1048,23 +976,29 @@ public class Translog extends AbstractIndexShardComponent implements IndexShardC
     }
 
     public static class Delete implements Operation {
-        public static final int SERIALIZATION_FORMAT = 2;
+        public static final int SERIALIZATION_FORMAT = 2; // since 2.0-beta1 and 1.1
 
-        private Term uid;
-        private long version = Versions.MATCH_ANY;
-        private VersionType versionType = VersionType.INTERNAL;
+        private final Term uid;
+        private final long version;
+        private final VersionType versionType;
 
-        public Delete() {
+        public Delete(StreamInput in) throws IOException {
+            final int format = in.readVInt();// SERIALIZATION_FORMAT
+            assert format == SERIALIZATION_FORMAT : "format was: " + format;
+            uid = new Term(in.readString(), in.readString());
+            this.version = in.readLong();
+            this.versionType = VersionType.fromValue(in.readByte());
+            assert versionType.validateVersionForWrites(this.version);
         }
 
         public Delete(Engine.Delete delete) {
-            this(delete.uid());
+            this.uid = delete.uid();
             this.version = delete.version();
             this.versionType = delete.versionType();
         }
 
         public Delete(Term uid) {
-            this.uid = uid;
+            this(uid, Versions.MATCH_ANY, VersionType.INTERNAL);
         }
 
         public Delete(Term uid, long version, VersionType versionType) {
@@ -1098,20 +1032,6 @@ public class Translog extends AbstractIndexShardComponent implements IndexShardC
         @Override
         public Source getSource() {
             throw new IllegalStateException("trying to read doc source from delete operation");
-        }
-
-        @Override
-        public void readFrom(StreamInput in) throws IOException {
-            int version = in.readVInt(); // version
-            uid = new Term(in.readString(), in.readString());
-            if (version >= 1) {
-                this.version = in.readLong();
-            }
-            if (version >= 2) {
-                this.versionType = VersionType.fromValue(in.readByte());
-            }
-            assert versionType.validateVersionForWrites(version);
-
         }
 
         @Override
@@ -1192,7 +1112,7 @@ public class Translog extends AbstractIndexShardComponent implements IndexShardC
     }
 
     static Translog.Operation readOperation(BufferedChecksumStreamInput in) throws IOException {
-        Translog.Operation operation;
+        final Translog.Operation operation;
         try {
             final int opSize = in.readInt();
             if (opSize < 4) { // 4byte for the checksum
@@ -1209,9 +1129,7 @@ public class Translog extends AbstractIndexShardComponent implements IndexShardC
                 verifyChecksum(in);
                 in.reset();
             }
-            Translog.Operation.Type type = Translog.Operation.Type.fromId(in.readByte());
-            operation = newOperationFromType(type);
-            operation.readFrom(in);
+            operation = Translog.Operation.readType(in);
             verifyChecksum(in);
         } catch (EOFException e) {
             throw new TruncatedTranslogException("reached premature end of file, translog is truncated", e);
@@ -1233,10 +1151,10 @@ public class Translog extends AbstractIndexShardComponent implements IndexShardC
             for (Operation op : toWrite) {
                 out.reset();
                 final long start = out.position();
-                out.skip(RamUsageEstimator.NUM_BYTES_INT);
+                out.skip(Integer.BYTES);
                 writeOperationNoSize(checksumStreamOutput, op);
                 long end = out.position();
-                int operationSize = (int) (out.position() - RamUsageEstimator.NUM_BYTES_INT - start);
+                int operationSize = (int) (out.position() - Integer.BYTES - start);
                 out.seek(start);
                 out.writeInt(operationSize);
                 out.seek(end);
@@ -1254,41 +1172,21 @@ public class Translog extends AbstractIndexShardComponent implements IndexShardC
         // because closing it closes the underlying stream, which we don't
         // want to do here.
         out.resetDigest();
-        out.writeByte(op.opType().id());
-        op.writeTo(out);
+        Translog.Operation.writeType(op, out);
         long checksum = out.getChecksum();
         out.writeInt((int) checksum);
     }
-
-    /**
-     * Returns a new empty translog operation for the given {@link Translog.Operation.Type}
-     */
-    static Translog.Operation newOperationFromType(Translog.Operation.Type type) throws IOException {
-        switch (type) {
-            case CREATE:
-                // the deserialization logic in Index was identical to that of Create when create was deprecated
-                return new Index();
-            case DELETE:
-                return new Translog.Delete();
-            case INDEX:
-                return new Index();
-            default:
-                throw new IOException("No type for [" + type + "]");
-        }
-    }
-
 
     @Override
     public void prepareCommit() throws IOException {
         try (ReleasableLock lock = writeLock.acquire()) {
             ensureOpen();
-            if (currentCommittingTranslog != null) {
-                throw new IllegalStateException("already committing a translog with generation: " + currentCommittingTranslog.getGeneration());
+            if (currentCommittingGeneration != NOT_SET_GENERATION) {
+                throw new IllegalStateException("already committing a translog with generation: " + currentCommittingGeneration);
             }
-            final TranslogWriter oldCurrent = current;
-            oldCurrent.ensureOpen();
-            oldCurrent.sync();
-            currentCommittingTranslog = current.immutableReader();
+            currentCommittingGeneration = current.getGeneration();
+            TranslogReader currentCommittingTranslog = current.closeIntoReader();
+            readers.add(currentCommittingTranslog);
             Path checkpoint = location.resolve(CHECKPOINT_FILE_NAME);
             assert Checkpoint.read(checkpoint).generation == currentCommittingTranslog.getGeneration();
             Path commitCheckpoint = location.resolve(getCommitCheckpointFileName(currentCommittingTranslog.getGeneration()));
@@ -1297,14 +1195,7 @@ public class Translog extends AbstractIndexShardComponent implements IndexShardC
             IOUtils.fsync(commitCheckpoint.getParent(), true);
             // create a new translog file - this will sync it and update the checkpoint data;
             current = createWriter(current.getGeneration() + 1);
-            // notify all outstanding views of the new translog (no views are created now as
-            // we hold a write lock).
-            for (View view : outstandingViews) {
-                view.onNewTranslog(currentCommittingTranslog.clone(), current.newReaderFromWriter());
-            }
-            IOUtils.close(oldCurrent);
             logger.trace("current translog set to [{}]", current.getGeneration());
-            assert oldCurrent.syncNeeded() == false : "old translog oldCurrent must not need a sync";
 
         } catch (Throwable t) {
             IOUtils.closeWhileHandlingException(this); // tragic event
@@ -1314,23 +1205,52 @@ public class Translog extends AbstractIndexShardComponent implements IndexShardC
 
     @Override
     public void commit() throws IOException {
-        ImmutableTranslogReader toClose = null;
         try (ReleasableLock lock = writeLock.acquire()) {
             ensureOpen();
-            if (currentCommittingTranslog == null) {
+            if (currentCommittingGeneration == NOT_SET_GENERATION) {
                 prepareCommit();
             }
+            assert currentCommittingGeneration != NOT_SET_GENERATION;
+            assert readers.stream().filter(r -> r.getGeneration() == currentCommittingGeneration).findFirst().isPresent()
+                    : "reader list doesn't contain committing generation [" + currentCommittingGeneration + "]";
             lastCommittedTranslogFileGeneration = current.getGeneration(); // this is important - otherwise old files will not be cleaned up
-            if (recoveredTranslogs.isEmpty() == false) {
-                IOUtils.close(recoveredTranslogs);
-                recoveredTranslogs.clear();
-            }
-            toClose = this.currentCommittingTranslog;
-            this.currentCommittingTranslog = null;
-        } finally {
-            IOUtils.close(toClose);
+            currentCommittingGeneration = NOT_SET_GENERATION;
+            trimUnreferencedReaders();
         }
     }
+
+    void trimUnreferencedReaders() {
+        try (ReleasableLock ignored = writeLock.acquire()) {
+            if (closed.get()) {
+                // we're shutdown potentially on some tragic event - don't delete anything
+                return;
+            }
+            long minReferencedGen = outstandingViews.stream().mapToLong(View::minTranslogGeneration).min().orElse(Long.MAX_VALUE);
+            minReferencedGen = Math.min(lastCommittedTranslogFileGeneration, minReferencedGen);
+            final long finalMinReferencedGen = minReferencedGen;
+            List<TranslogReader> unreferenced = readers.stream().filter(r -> r.getGeneration() < finalMinReferencedGen).collect(Collectors.toList());
+            for (final TranslogReader unreferencedReader : unreferenced) {
+                Path translogPath = unreferencedReader.path();
+                logger.trace("delete translog file - not referenced and not current anymore {}", translogPath);
+                IOUtils.closeWhileHandlingException(unreferencedReader);
+                IOUtils.deleteFilesIgnoringExceptions(translogPath,
+                        translogPath.resolveSibling(getCommitCheckpointFileName(unreferencedReader.getGeneration())));
+            }
+            readers.removeAll(unreferenced);
+        }
+    }
+
+    void closeFilesIfNoPendingViews() throws IOException {
+        try (ReleasableLock ignored = writeLock.acquire()) {
+            if (closed.get() && outstandingViews.isEmpty()) {
+                logger.trace("closing files. translog is closed and there are no pending views");
+                ArrayList<Closeable> toClose = new ArrayList<>(readers);
+                toClose.add(current);
+                IOUtils.close(toClose);
+            }
+        }
+    }
+
 
     @Override
     public void rollback() throws IOException {
@@ -1397,9 +1317,11 @@ public class Translog extends AbstractIndexShardComponent implements IndexShardC
         return TranslogWriter.ChannelFactory.DEFAULT;
     }
 
-    /** If this {@code Translog} was closed as a side-effect of a tragic exception,
-     *  e.g. disk full while flushing a new segment, this returns the root cause exception.
-     *  Otherwise (no tragic exception has occurred) it returns null. */
+    /**
+     * If this {@code Translog} was closed as a side-effect of a tragic exception,
+     * e.g. disk full while flushing a new segment, this returns the root cause exception.
+     * Otherwise (no tragic exception has occurred) it returns null.
+     */
     public Throwable getTragicException() {
         return current.getTragicException();
     }
@@ -1407,6 +1329,13 @@ public class Translog extends AbstractIndexShardComponent implements IndexShardC
     /** Reads and returns the current checkpoint */
     final Checkpoint readCheckpoint() throws IOException {
         return Checkpoint.read(location.resolve(CHECKPOINT_FILE_NAME));
+    }
+
+    /**
+     * Returns the translog uuid used to associate a lucene index with a translog.
+     */
+    public String getTranslogUUID() {
+        return translogUUID;
     }
 
 }

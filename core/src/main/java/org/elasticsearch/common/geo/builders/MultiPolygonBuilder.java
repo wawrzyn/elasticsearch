@@ -19,8 +19,9 @@
 
 package org.elasticsearch.common.geo.builders;
 
-import com.spatial4j.core.shape.Shape;
+import org.locationtech.spatial4j.shape.Shape;
 import com.vividsolutions.jts.geom.Coordinate;
+
 import org.elasticsearch.common.geo.XShapeCollection;
 import org.elasticsearch.common.io.stream.StreamInput;
 import org.elasticsearch.common.io.stream.StreamOutput;
@@ -35,18 +36,43 @@ import java.util.Objects;
 public class MultiPolygonBuilder extends ShapeBuilder {
 
     public static final GeoShapeType TYPE = GeoShapeType.MULTIPOLYGON;
-    public static final MultiPolygonBuilder PROTOTYPE = new MultiPolygonBuilder();
 
-    private final ArrayList<PolygonBuilder> polygons = new ArrayList<>();
+    private final List<PolygonBuilder> polygons = new ArrayList<>();
 
-    private Orientation orientation = Orientation.RIGHT;
+    private final Orientation orientation;
 
+    /**
+     * Build a MultiPolygonBuilder with RIGHT orientation.
+     */
     public MultiPolygonBuilder() {
         this(Orientation.RIGHT);
     }
 
+    /**
+     * Build a MultiPolygonBuilder with an arbitrary orientation.
+     */
     public MultiPolygonBuilder(Orientation orientation) {
         this.orientation = orientation;
+    }
+
+    /**
+     * Read from a stream.
+     */
+    public MultiPolygonBuilder(StreamInput in) throws IOException {
+        orientation = Orientation.readFrom(in);
+        int holes = in.readVInt();
+        for (int i = 0; i < holes; i++) {
+            polygon(new PolygonBuilder(in));
+        }
+    }
+
+    @Override
+    public void writeTo(StreamOutput out) throws IOException {
+        orientation.writeTo(out);
+        out.writeVInt(polygons.size());
+        for (PolygonBuilder polygon : polygons) {
+            polygon.writeTo(out);
+        }
     }
 
     public Orientation orientation() {
@@ -58,8 +84,7 @@ public class MultiPolygonBuilder extends ShapeBuilder {
      * {@link MultiPolygonBuilder} to the polygon if polygon has different orientation.
      */
     public MultiPolygonBuilder polygon(PolygonBuilder polygon) {
-        PolygonBuilder pb = new PolygonBuilder(this.orientation);
-        pb.points(polygon.shell().coordinates(false));
+        PolygonBuilder pb = new PolygonBuilder(new CoordinatesBuilder().coordinates(polygon.shell().coordinates(false)), this.orientation);
         for (LineStringBuilder hole : polygon.holes()) {
             pb.hole(hole);
         }
@@ -70,7 +95,7 @@ public class MultiPolygonBuilder extends ShapeBuilder {
     /**
      * get the list of polygons
      */
-    public ArrayList<PolygonBuilder> polygons() {
+    public List<PolygonBuilder> polygons() {
         return polygons;
     }
 
@@ -133,24 +158,5 @@ public class MultiPolygonBuilder extends ShapeBuilder {
         MultiPolygonBuilder other = (MultiPolygonBuilder) obj;
         return Objects.equals(polygons, other.polygons) &&
                 Objects.equals(orientation, other.orientation);
-    }
-
-    @Override
-    public void writeTo(StreamOutput out) throws IOException {
-        orientation.writeTo(out);
-        out.writeVInt(polygons.size());
-        for (PolygonBuilder polygon : polygons) {
-            polygon.writeTo(out);
-        }
-    }
-
-    @Override
-    public MultiPolygonBuilder readFrom(StreamInput in) throws IOException {
-        MultiPolygonBuilder polyBuilder = new MultiPolygonBuilder(Orientation.readFrom(in));
-        int holes = in.readVInt();
-        for (int i = 0; i < holes; i++) {
-            polyBuilder.polygon(PolygonBuilder.PROTOTYPE.readFrom(in));
-        }
-        return polyBuilder;
     }
 }

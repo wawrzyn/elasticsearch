@@ -27,6 +27,7 @@ import org.elasticsearch.action.admin.indices.stats.IndicesStatsResponse;
 import org.elasticsearch.action.admin.indices.stats.TransportIndicesStatsAction;
 import org.elasticsearch.cluster.node.DiscoveryNode;
 import org.elasticsearch.cluster.routing.ShardRouting;
+import org.elasticsearch.cluster.service.ClusterService;
 import org.elasticsearch.common.collect.ImmutableOpenMap;
 import org.elasticsearch.common.inject.Inject;
 import org.elasticsearch.common.settings.ClusterSettings;
@@ -37,7 +38,12 @@ import org.elasticsearch.monitor.fs.FsInfo;
 import org.elasticsearch.plugins.Plugin;
 import org.elasticsearch.threadpool.ThreadPool;
 
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.concurrent.CountDownLatch;
+
+import static java.util.Collections.emptyMap;
+import static java.util.Collections.emptySet;
 
 /**
  * Fake ClusterInfoService class that allows updating the nodes stats disk
@@ -46,14 +52,6 @@ import java.util.concurrent.CountDownLatch;
 public class MockInternalClusterInfoService extends InternalClusterInfoService {
 
     public static class TestPlugin extends Plugin {
-        @Override
-        public String name() {
-            return "mock-cluster-info-service";
-        }
-        @Override
-        public String description() {
-            return "a mock cluster info service for testing";
-        }
         public void onModule(ClusterModule module) {
             module.clusterInfoServiceImpl = MockInternalClusterInfoService.class;
         }
@@ -68,13 +66,13 @@ public class MockInternalClusterInfoService extends InternalClusterInfoService {
         FsInfo.Path path = new FsInfo.Path("/dev/null", null,
             usage.getTotalBytes(), usage.getFreeBytes(), usage.getFreeBytes());
         paths[0] = path;
-        FsInfo fsInfo = new FsInfo(System.currentTimeMillis(), paths);
-        return new NodeStats(new DiscoveryNode(nodeName, DummyTransportAddress.INSTANCE, Version.CURRENT),
+        FsInfo fsInfo = new FsInfo(System.currentTimeMillis(), null, paths);
+        return new NodeStats(new DiscoveryNode(nodeName, DummyTransportAddress.INSTANCE, emptyMap(), emptySet(), Version.CURRENT),
             System.currentTimeMillis(),
             null, null, null, null, null,
             fsInfo,
             null, null, null,
-            null, null);
+            null, null, null);
     }
 
     @Inject
@@ -83,7 +81,7 @@ public class MockInternalClusterInfoService extends InternalClusterInfoService {
                                           TransportIndicesStatsAction transportIndicesStatsAction,
                                           ClusterService clusterService, ThreadPool threadPool) {
         super(settings, clusterSettings, transportNodesStatsAction, transportIndicesStatsAction, clusterService, threadPool);
-        this.clusterName = ClusterName.clusterNameFromSettings(settings);
+        this.clusterName = ClusterName.CLUSTER_NAME_SETTING.get(settings);
         stats[0] = makeStats("node_t1", new DiskUsage("node_t1", "n1", "/dev/null", 100, 100));
         stats[1] = makeStats("node_t2", new DiskUsage("node_t2", "n2", "/dev/null", 100, 100));
         stats[2] = makeStats("node_t3", new DiskUsage("node_t3", "n3", "/dev/null", 100, 100));
@@ -103,7 +101,7 @@ public class MockInternalClusterInfoService extends InternalClusterInfoService {
 
     @Override
     public CountDownLatch updateNodeStats(final ActionListener<NodesStatsResponse> listener) {
-        NodesStatsResponse response = new NodesStatsResponse(clusterName, stats);
+        NodesStatsResponse response = new NodesStatsResponse(clusterName, Arrays.asList(stats), Collections.emptyList());
         listener.onResponse(response);
         return new CountDownLatch(0);
     }

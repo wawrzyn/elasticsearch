@@ -25,57 +25,55 @@ import org.elasticsearch.common.component.AbstractComponent;
 import org.elasticsearch.common.inject.Inject;
 import org.elasticsearch.common.settings.ClusterSettings;
 import org.elasticsearch.common.settings.Setting;
+import org.elasticsearch.common.settings.Setting.Property;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.unit.ByteSizeUnit;
 import org.elasticsearch.common.unit.ByteSizeValue;
 import org.elasticsearch.common.unit.TimeValue;
-import org.elasticsearch.common.util.concurrent.EsExecutors;
-import org.elasticsearch.threadpool.ThreadPool;
 
-import java.io.Closeable;
-import java.util.concurrent.ThreadPoolExecutor;
-import java.util.concurrent.TimeUnit;
+public class RecoverySettings extends AbstractComponent {
 
-/**
- */
-public class RecoverySettings extends AbstractComponent implements Closeable {
-
-    public static final Setting<Integer> INDICES_RECOVERY_CONCURRENT_STREAMS_SETTING = Setting.intSetting("indices.recovery.concurrent_streams", 3, true, Setting.Scope.CLUSTER);
-    public static final Setting<Integer> INDICES_RECOVERY_CONCURRENT_SMALL_FILE_STREAMS_SETTING = Setting.intSetting("indices.recovery.concurrent_small_file_streams", 2, true, Setting.Scope.CLUSTER);
-    public static final Setting<ByteSizeValue> INDICES_RECOVERY_MAX_BYTES_PER_SEC_SETTING = Setting.byteSizeSetting("indices.recovery.max_bytes_per_sec", new ByteSizeValue(40, ByteSizeUnit.MB), true, Setting.Scope.CLUSTER);
+    public static final Setting<ByteSizeValue> INDICES_RECOVERY_MAX_BYTES_PER_SEC_SETTING =
+        Setting.byteSizeSetting("indices.recovery.max_bytes_per_sec", new ByteSizeValue(40, ByteSizeUnit.MB),
+            Property.Dynamic, Property.NodeScope);
 
     /**
      * how long to wait before retrying after issues cause by cluster state syncing between nodes
      * i.e., local node is not yet known on remote node, remote shard not yet started etc.
      */
-    public static final Setting<TimeValue> INDICES_RECOVERY_RETRY_DELAY_STATE_SYNC_SETTING = Setting.positiveTimeSetting("indices.recovery.retry_delay_state_sync", TimeValue.timeValueMillis(500), true, Setting.Scope.CLUSTER);
+    public static final Setting<TimeValue> INDICES_RECOVERY_RETRY_DELAY_STATE_SYNC_SETTING =
+        Setting.positiveTimeSetting("indices.recovery.retry_delay_state_sync", TimeValue.timeValueMillis(500),
+            Property.Dynamic, Property.NodeScope);
 
     /** how long to wait before retrying after network related issues */
-    public static final Setting<TimeValue> INDICES_RECOVERY_RETRY_DELAY_NETWORK_SETTING = Setting.positiveTimeSetting("indices.recovery.retry_delay_network", TimeValue.timeValueSeconds(5), true, Setting.Scope.CLUSTER);
+    public static final Setting<TimeValue> INDICES_RECOVERY_RETRY_DELAY_NETWORK_SETTING =
+        Setting.positiveTimeSetting("indices.recovery.retry_delay_network", TimeValue.timeValueSeconds(5),
+            Property.Dynamic, Property.NodeScope);
 
     /** timeout value to use for requests made as part of the recovery process */
-    public static final Setting<TimeValue> INDICES_RECOVERY_INTERNAL_ACTION_TIMEOUT_SETTING = Setting.positiveTimeSetting("indices.recovery.internal_action_timeout", TimeValue.timeValueMinutes(15), true, Setting.Scope.CLUSTER);
+    public static final Setting<TimeValue> INDICES_RECOVERY_INTERNAL_ACTION_TIMEOUT_SETTING =
+        Setting.positiveTimeSetting("indices.recovery.internal_action_timeout", TimeValue.timeValueMinutes(15),
+            Property.Dynamic, Property.NodeScope);
 
     /**
      * timeout value to use for requests made as part of the recovery process that are expected to take long time.
      * defaults to twice `indices.recovery.internal_action_timeout`.
      */
-    public static final Setting<TimeValue> INDICES_RECOVERY_INTERNAL_LONG_ACTION_TIMEOUT_SETTING = Setting.timeSetting("indices.recovery.internal_action_long_timeout", (s) -> TimeValue.timeValueMillis(INDICES_RECOVERY_INTERNAL_ACTION_TIMEOUT_SETTING.get(s).millis() * 2).toString(), TimeValue.timeValueSeconds(0), true,  Setting.Scope.CLUSTER);
+    public static final Setting<TimeValue> INDICES_RECOVERY_INTERNAL_LONG_ACTION_TIMEOUT_SETTING =
+        Setting.timeSetting("indices.recovery.internal_action_long_timeout",
+            (s) -> TimeValue.timeValueMillis(INDICES_RECOVERY_INTERNAL_ACTION_TIMEOUT_SETTING.get(s).millis() * 2).toString(),
+            TimeValue.timeValueSeconds(0), Property.Dynamic,  Property.NodeScope);
 
     /**
      * recoveries that don't show any activity for more then this interval will be failed.
      * defaults to `indices.recovery.internal_action_long_timeout`
      */
-    public static final Setting<TimeValue> INDICES_RECOVERY_ACTIVITY_TIMEOUT_SETTING = Setting.timeSetting("indices.recovery.recovery_activity_timeout", (s) -> INDICES_RECOVERY_INTERNAL_LONG_ACTION_TIMEOUT_SETTING.getRaw(s) , TimeValue.timeValueSeconds(0), true,  Setting.Scope.CLUSTER);
-
-    public static final long SMALL_FILE_CUTOFF_BYTES = ByteSizeValue.parseBytesSizeValue("5mb", "SMALL_FILE_CUTOFF_BYTES").bytes();
+    public static final Setting<TimeValue> INDICES_RECOVERY_ACTIVITY_TIMEOUT_SETTING =
+        Setting.timeSetting("indices.recovery.recovery_activity_timeout",
+            (s) -> INDICES_RECOVERY_INTERNAL_LONG_ACTION_TIMEOUT_SETTING.getRaw(s) , TimeValue.timeValueSeconds(0),
+            Property.Dynamic, Property.NodeScope);
 
     public static final ByteSizeValue DEFAULT_CHUNK_SIZE = new ByteSizeValue(512, ByteSizeUnit.KB);
-
-    private volatile int concurrentStreams;
-    private volatile int concurrentSmallFileStreams;
-    private final ThreadPoolExecutor concurrentStreamPool;
-    private final ThreadPoolExecutor concurrentSmallFileStreamPool;
 
     private volatile ByteSizeValue maxBytesPerSec;
     private volatile SimpleRateLimiter rateLimiter;
@@ -100,15 +98,6 @@ public class RecoverySettings extends AbstractComponent implements Closeable {
         this.internalActionLongTimeout = INDICES_RECOVERY_INTERNAL_LONG_ACTION_TIMEOUT_SETTING.get(settings);
 
         this.activityTimeout = INDICES_RECOVERY_ACTIVITY_TIMEOUT_SETTING.get(settings);
-
-
-        this.concurrentStreams = INDICES_RECOVERY_CONCURRENT_STREAMS_SETTING.get(settings);
-        this.concurrentStreamPool = EsExecutors.newScaling("recovery_stream", 0, concurrentStreams, 60, TimeUnit.SECONDS,
-                EsExecutors.daemonThreadFactory(settings, "[recovery_stream]"));
-        this.concurrentSmallFileStreams = INDICES_RECOVERY_CONCURRENT_SMALL_FILE_STREAMS_SETTING.get(settings);
-        this.concurrentSmallFileStreamPool = EsExecutors.newScaling("small_file_recovery_stream", 0, concurrentSmallFileStreams, 60,
-                TimeUnit.SECONDS, EsExecutors.daemonThreadFactory(settings, "[small_file_recovery_stream]"));
-
         this.maxBytesPerSec = INDICES_RECOVERY_MAX_BYTES_PER_SEC_SETTING.get(settings);
         if (maxBytesPerSec.bytes() <= 0) {
             rateLimiter = null;
@@ -116,31 +105,15 @@ public class RecoverySettings extends AbstractComponent implements Closeable {
             rateLimiter = new SimpleRateLimiter(maxBytesPerSec.mbFrac());
         }
 
-        logger.debug("using max_bytes_per_sec[{}], concurrent_streams [{}]",
-                maxBytesPerSec, concurrentStreams);
 
-        clusterSettings.addSettingsUpdateConsumer(INDICES_RECOVERY_CONCURRENT_STREAMS_SETTING, this::setConcurrentStreams);
-        clusterSettings.addSettingsUpdateConsumer(INDICES_RECOVERY_CONCURRENT_SMALL_FILE_STREAMS_SETTING, this::setConcurrentSmallFileStreams);
+        logger.debug("using max_bytes_per_sec[{}]", maxBytesPerSec);
+
         clusterSettings.addSettingsUpdateConsumer(INDICES_RECOVERY_MAX_BYTES_PER_SEC_SETTING, this::setMaxBytesPerSec);
         clusterSettings.addSettingsUpdateConsumer(INDICES_RECOVERY_RETRY_DELAY_STATE_SYNC_SETTING, this::setRetryDelayStateSync);
         clusterSettings.addSettingsUpdateConsumer(INDICES_RECOVERY_RETRY_DELAY_NETWORK_SETTING, this::setRetryDelayNetwork);
         clusterSettings.addSettingsUpdateConsumer(INDICES_RECOVERY_INTERNAL_ACTION_TIMEOUT_SETTING, this::setInternalActionTimeout);
         clusterSettings.addSettingsUpdateConsumer(INDICES_RECOVERY_INTERNAL_LONG_ACTION_TIMEOUT_SETTING, this::setInternalActionLongTimeout);
         clusterSettings.addSettingsUpdateConsumer(INDICES_RECOVERY_ACTIVITY_TIMEOUT_SETTING, this::setActivityTimeout);
-    }
-
-    @Override
-    public void close() {
-        ThreadPool.terminate(concurrentStreamPool, 1, TimeUnit.SECONDS);
-        ThreadPool.terminate(concurrentSmallFileStreamPool, 1, TimeUnit.SECONDS);
-    }
-
-    public ThreadPoolExecutor concurrentStreamPool() {
-        return concurrentStreamPool;
-    }
-
-    public ThreadPoolExecutor concurrentSmallFileStreamPool() {
-        return concurrentSmallFileStreamPool;
     }
 
     public RateLimiter rateLimiter() {
@@ -176,10 +149,6 @@ public class RecoverySettings extends AbstractComponent implements Closeable {
         this.chunkSize = chunkSize;
     }
 
-    private void setConcurrentStreams(int concurrentStreams) {
-        this.concurrentStreams = concurrentStreams;
-        concurrentStreamPool.setMaximumPoolSize(concurrentStreams);
-    }
 
     public void setRetryDelayStateSync(TimeValue retryDelayStateSync) {
         this.retryDelayStateSync = retryDelayStateSync;
@@ -210,10 +179,5 @@ public class RecoverySettings extends AbstractComponent implements Closeable {
         } else {
             rateLimiter = new SimpleRateLimiter(maxBytesPerSec.mbFrac());
         }
-    }
-
-    private void setConcurrentSmallFileStreams(int concurrentSmallFileStreams) {
-        this.concurrentSmallFileStreams = concurrentSmallFileStreams;
-        concurrentSmallFileStreamPool.setMaximumPoolSize(concurrentSmallFileStreams);
     }
 }

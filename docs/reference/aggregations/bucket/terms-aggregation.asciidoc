@@ -56,7 +56,7 @@ default, the node coordinating the search process will request each shard to pro
 and once all shards respond, it will reduce the results to the final list that will then be returned to the client.
 This means that if the number of unique terms is greater than `size`, the returned list is slightly off and not accurate
 (it could be that the term counts are slightly off and it could even be that a term that should have been in the top
-size buckets was not returned). If set to `0`, the `size` will be set to `Integer.MAX_VALUE`.
+size buckets was not returned).
 
 [[search-aggregations-bucket-terms-aggregation-approximate-counts]]
 ==== Document counts are approximate
@@ -149,14 +149,12 @@ The `shard_size` parameter can be  used to minimize the extra work that comes wi
 it will determine how many terms the coordinating node will request from each shard. Once all the shards responded, the
 coordinating node will then reduce them to a final result which will be based on the `size` parameter - this way,
 one can increase the accuracy of the returned terms and avoid the overhead of streaming a big list of buckets back to
-the client. If set to `0`, the `shard_size` will be set to `Integer.MAX_VALUE`.
+the client.
 
 
 NOTE:   `shard_size` cannot be smaller than `size` (as it doesn't make much sense). When it is, elasticsearch will
         override it and reset it to be equal to `size`.
 
-It is possible to not limit the number of terms that are returned by setting `size` to `0`. Don't use this
-on high-cardinality fields as this will kill both your CPU since terms need to be return sorted, and your network.
 
 The default `shard_size` is a multiple of the `size` parameter which is dependant on the number of shards.
 
@@ -200,7 +198,7 @@ The second error value can be enabled by setting the `show_term_doc_count_error`
 for each term returned by the aggregation which represents the 'worst case' error in the document count and can be useful when
 deciding on a value for the `shard_size` parameter. This is calculated by summing the document counts for the last term returned
 by all shards which did not return the term. In the example above the error in the document count for Product C would be 15 as
-Shard B was the only shard not to return the term and the document count of the last termit did return was 15. The actual document
+Shard B was the only shard not to return the term and the document count of the last term it did return was 15. The actual document
 count of Product C was 54 so the document count was only actually off by 4 even though the worst case was that it would be off by
 15.  Product A, however has an error of 0 for its document count, since every shard returned it we can be confident that the count
 returned is accurate.
@@ -313,6 +311,15 @@ Ordering the buckets by multi value metrics sub-aggregation (identified by the a
     }
 }
 --------------------------------------------------
+
+WARNING: Sorting by ascending `_count` or by sub aggregation is discouraged as it increases the
+<<search-aggregations-bucket-terms-aggregation-approximate-counts,error>> on document counts.
+It is fine when a single shard is queried, or when the field that is being aggregated was used
+as a routing key at index time: in these cases results will be accurate since shards have disjoint
+values. However otherwise, errors are unbounded. One particular case that could still be useful
+is sorting by <<search-aggregations-metrics-min-aggregation,`min`>> or
+<<search-aggregations-metrics-max-aggregation,`max`>> aggregation: counts will not be accurate
+but at least the top buckets will be correctly picked.
 
 It is also possible to order the buckets based on a "deeper" aggregation in the hierarchy. This is supported as long
 as the aggregations path are of a single-bucket type, where the last aggregation in the path may either be a single-bucket
@@ -434,7 +441,10 @@ Generating the terms using a script:
     "aggs" : {
         "genders" : {
             "terms" : {
-                "script" : "doc['gender'].value"
+                "script" : {
+                    "inline": "doc['gender'].value"
+                    "lang": "painless"
+                }
             }
         }
     }
@@ -473,7 +483,10 @@ TIP: for indexed scripts replace the `file` parameter with an `id` parameter.
         "genders" : {
             "terms" : {
                 "field" : "gender",
-                "script" : "'Gender: ' +_value"
+                "script" : {
+                    "inline" : "'Gender: ' +_value"
+                    "lang" : "painless"
+                }
             }
         }
     }
@@ -564,7 +577,8 @@ Deferring calculation of child aggregations
 
 For fields with many unique terms and a small number of required results it can be more efficient to delay the calculation
 of child aggregations until the top parent-level aggs have been pruned. Ordinarily, all branches of the aggregation tree
-are expanded in one depth-first pass and only then any pruning occurs. In some rare scenarios this can be very wasteful and can hit memory constraints.
+are expanded in one depth-first pass and only then any pruning occurs.
+In some scenarios this can be very wasteful and can hit memory constraints.
 An example problem scenario is querying a movie database for the 10 most popular actors and their 5 most common co-stars:
 
 [source,js]
@@ -589,10 +603,13 @@ An example problem scenario is querying a movie database for the 10 most popular
 }
 --------------------------------------------------
 
-Even though the number of movies may be comparatively small and we want only 50 result buckets there is a combinatorial explosion of buckets
-during calculation - a single movie will produce n² buckets where n is the number of actors. The sane option would be to first determine
+Even though the number of actors may be comparatively small and we want only 50 result buckets there is a combinatorial explosion of buckets
+during calculation - a single actor can produce n² buckets where n is the number of actors. The sane option would be to first determine
 the 10 most popular actors and only then examine the top co-stars for these 10 actors. This alternative strategy is what we call the `breadth_first` collection
-mode as opposed to the default `depth_first` mode:
+mode as opposed to the `depth_first` mode.
+
+NOTE: The `breadth_first` is the default mode for fields with a cardinality bigger than the requested size or when the cardinality is unknown (numeric fields or scripts for instance).
+It is possible to override the default heuristic and to provide a collect mode directly in the request:
 
 [source,js]
 --------------------------------------------------
@@ -602,7 +619,7 @@ mode as opposed to the default `depth_first` mode:
              "terms" : {
                  "field" : "actors",
                  "size" : 10,
-                 "collect_mode" : "breadth_first"
+                 "collect_mode" : "breadth_first" <1>
              },
             "aggs" : {
                 "costars" : {
@@ -617,18 +634,15 @@ mode as opposed to the default `depth_first` mode:
 }
 --------------------------------------------------
 
+<1> the possible values are `breadth_first` and `depth_first`
 
 When using `breadth_first` mode the set of documents that fall into the uppermost buckets are
 cached for subsequent replay so there is a memory overhead in doing this which is linear with the number of matching documents.
-In most requests the volume of buckets generated is smaller than the number of documents that fall into them so the default `depth_first`
-collection mode is normally the best bet but occasionally the `breadth_first` strategy can be significantly more efficient. Currently
-elasticsearch will always use the `depth_first` collect_mode unless explicitly instructed to use `breadth_first` as in the above example.
 Note that the `order` parameter can still be used to refer to data from a child aggregation when using the `breadth_first` setting - the parent
 aggregation understands that this child aggregation will need to be called first before any of the other child aggregations.
 
-WARNING: It is not possible to nest aggregations such as `top_hits` which require access to match score information under an aggregation that uses
-the `breadth_first` collection mode. This is because this would require a RAM buffer to hold the float score value for every document and
-this would typically be too costly in terms of RAM.
+WARNING: Nested aggregations such as `top_hits` which require access to score information under an aggregation that uses the `breadth_first`
+collection mode need to replay the query on the second pass but only for the documents belonging to the top buckets.
 
 [[search-aggregations-bucket-terms-aggregation-execution-hint]]
 ==== Execution hint
@@ -696,4 +710,4 @@ had a value.
 }
 --------------------------------------------------
 
-<1> Documents without a value in the `tags` field will fall into the same bucket as documents that have the value `N/A`. 
+<1> Documents without a value in the `tags` field will fall into the same bucket as documents that have the value `N/A`.

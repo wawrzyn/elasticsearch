@@ -24,6 +24,7 @@ import org.elasticsearch.action.ActionRequest;
 import org.elasticsearch.action.ActionRequestValidationException;
 import org.elasticsearch.action.delete.DeleteRequest;
 import org.elasticsearch.action.index.IndexRequest;
+import org.elasticsearch.action.support.WriteRequest.RefreshPolicy;
 import org.elasticsearch.action.update.UpdateRequest;
 import org.elasticsearch.client.Requests;
 import org.elasticsearch.common.Strings;
@@ -87,7 +88,7 @@ public class BulkRequestTests extends ESTestCase {
         Script script = ((UpdateRequest) bulkRequest.requests().get(1)).script();
         assertThat(script, notNullValue());
         assertThat(script.getScript(), equalTo("counter += param1"));
-        assertThat(script.getLang(), equalTo("js"));
+        assertThat(script.getLang(), equalTo("javascript"));
         Map<String, Object> scriptParams = script.getParams();
         assertThat(scriptParams, notNullValue());
         assertThat(scriptParams.size(), equalTo(1));
@@ -110,7 +111,7 @@ public class BulkRequestTests extends ESTestCase {
 
     public void testBulkAddIterable() {
         BulkRequest bulkRequest = Requests.bulkRequest();
-        List<ActionRequest> requests = new ArrayList<>();
+        List<ActionRequest<?>> requests = new ArrayList<>();
         requests.add(new IndexRequest("test", "test", "id").source("field", "value"));
         requests.add(new UpdateRequest("test", "test", "id").doc("field", "value"));
         requests.add(new DeleteRequest("test", "test", "id"));
@@ -150,9 +151,9 @@ public class BulkRequestTests extends ESTestCase {
         BulkRequest bulkRequest = new BulkRequest();
         try {
             bulkRequest.add(bulkAction.getBytes(StandardCharsets.UTF_8), 0, bulkAction.length(), null, null);
-            fail("should have thrown an exception about the unknown paramater _foo");
+            fail("should have thrown an exception about the unknown parameter _foo");
         } catch (IllegalArgumentException e) {
-            assertThat("message contains error about the unknown paramater _foo: " + e.getMessage(),
+            assertThat("message contains error about the unknown parameter _foo: " + e.getMessage(),
                     e.getMessage().contains("Action/metadata line [3] contains an unknown parameter [_foo]"), equalTo(true));
         }
     }
@@ -180,22 +181,22 @@ public class BulkRequestTests extends ESTestCase {
     public void testBulkRequestWithRefresh() throws Exception {
         BulkRequest bulkRequest = new BulkRequest();
         // We force here a "id is missing" validation error
-        bulkRequest.add(new DeleteRequest("index", "type", null).refresh(true));
+        bulkRequest.add(new DeleteRequest("index", "type", null).setRefreshPolicy(RefreshPolicy.IMMEDIATE));
         // We force here a "type is missing" validation error
         bulkRequest.add(new DeleteRequest("index", null, "id"));
-        bulkRequest.add(new DeleteRequest("index", "type", "id").refresh(true));
-        bulkRequest.add(new UpdateRequest("index", "type", "id").doc("{}").refresh(true));
-        bulkRequest.add(new IndexRequest("index", "type", "id").source("{}").refresh(true));
+        bulkRequest.add(new DeleteRequest("index", "type", "id").setRefreshPolicy(RefreshPolicy.IMMEDIATE));
+        bulkRequest.add(new UpdateRequest("index", "type", "id").doc("{}").setRefreshPolicy(RefreshPolicy.IMMEDIATE));
+        bulkRequest.add(new IndexRequest("index", "type", "id").source("{}").setRefreshPolicy(RefreshPolicy.IMMEDIATE));
         ActionRequestValidationException validate = bulkRequest.validate();
         assertThat(validate, notNullValue());
         assertThat(validate.validationErrors(), not(empty()));
         assertThat(validate.validationErrors(), contains(
-                "Refresh is not supported on an item request, set the refresh flag on the BulkRequest instead.",
+                "RefreshPolicy is not supported on an item request. Set it on the BulkRequest instead.",
                 "id is missing",
                 "type is missing",
-                "Refresh is not supported on an item request, set the refresh flag on the BulkRequest instead.",
-                "Refresh is not supported on an item request, set the refresh flag on the BulkRequest instead.",
-                "Refresh is not supported on an item request, set the refresh flag on the BulkRequest instead."));
+                "RefreshPolicy is not supported on an item request. Set it on the BulkRequest instead.",
+                "RefreshPolicy is not supported on an item request. Set it on the BulkRequest instead.",
+                "RefreshPolicy is not supported on an item request. Set it on the BulkRequest instead."));
     }
 
     // issue 15120
@@ -209,5 +210,12 @@ public class BulkRequestTests extends ESTestCase {
         assertThat(validate.validationErrors(), contains(
                 "script or doc is missing",
                 "source is missing"));
+    }
+
+    public void testCannotAddNullRequests() throws Exception {
+        BulkRequest bulkRequest = new BulkRequest();
+        expectThrows(NullPointerException.class, () -> bulkRequest.add((IndexRequest) null));
+        expectThrows(NullPointerException.class, () -> bulkRequest.add((UpdateRequest) null));
+        expectThrows(NullPointerException.class, () -> bulkRequest.add((DeleteRequest) null));
     }
 }

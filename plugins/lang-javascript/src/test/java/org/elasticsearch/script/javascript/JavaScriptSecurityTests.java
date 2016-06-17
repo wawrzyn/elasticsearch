@@ -54,7 +54,7 @@ public class JavaScriptSecurityTests extends ESTestCase {
     /** runs a script */
     private void doTest(String script) {
         Map<String, Object> vars = new HashMap<String, Object>();
-        se.executable(new CompiledScript(ScriptService.ScriptType.INLINE, "test", "js", se.compile(script, Collections.emptyMap())), vars).run();
+        se.executable(new CompiledScript(ScriptService.ScriptType.INLINE, "test", "js", se.compile(null, script, Collections.emptyMap())), vars).run();
     }
 
     /** asserts that a script runs without exception */
@@ -84,6 +84,7 @@ public class JavaScriptSecurityTests extends ESTestCase {
     public void testOK() {
         assertSuccess("1 + 2");
         assertSuccess("Math.cos(Math.PI)");
+        assertSuccess("Array.apply(null, Array(100)).map(function (_, i) {return i;}).map(function (i) {return i+1;})");
     }
 
     /** Test some javascripts that should hit security exception */

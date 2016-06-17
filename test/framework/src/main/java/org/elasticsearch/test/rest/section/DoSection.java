@@ -129,7 +129,11 @@ public class DoSection implements ExecutableSection {
     }
 
     private String formatStatusCodeMessage(RestResponse restResponse, String expected) {
-        return "expected [" + expected + "] status code but api [" + apiCallSection.getApi() + "] returned ["
+        String api = apiCallSection.getApi();
+        if ("raw".equals(api)) {
+            api += "[method=" + apiCallSection.getParams().get("method") + " path=" + apiCallSection.getParams().get("path") + "]";
+        }
+        return "expected [" + expected + "] status code but api [" + api + "] returned ["
                 + restResponse.getStatusCode() + " " + restResponse.getReasonPhrase() + "] [" + restResponse.getBodyAsString() + "]";
     }
 
@@ -140,6 +144,7 @@ public class DoSection implements ExecutableSection {
         catches.put("conflict", tuple("409", equalTo(409)));
         catches.put("forbidden", tuple("403", equalTo(403)));
         catches.put("request_timeout", tuple("408", equalTo(408)));
+        catches.put("unavailable", tuple("503", equalTo(503)));
         catches.put("request", tuple("4xx|5xx", allOf(greaterThanOrEqualTo(400), not(equalTo(404)), not(equalTo(408)), not(equalTo(409)), not(equalTo(403)))));
     }
 }

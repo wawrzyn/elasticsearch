@@ -31,6 +31,7 @@ import org.elasticsearch.test.rest.spec.RestSpec;
 import java.io.Closeable;
 import java.io.IOException;
 import java.net.InetSocketAddress;
+import java.net.URL;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -77,7 +78,7 @@ public class RestTestExecutionContext implements Closeable {
         try {
             response = callApiInternal(apiName, requestParams, body, headers);
             //we always stash the last response body
-            stash.stashValue("body", response.getBody());
+            stash.stashResponse(response);
             return response;
         } catch(RestException e) {
             response = e.restResponse();
@@ -119,9 +120,9 @@ public class RestTestExecutionContext implements Closeable {
     /**
      * Creates the embedded REST client when needed. Needs to be called before each test.
      */
-    public void initClient(InetSocketAddress[] addresses, Settings settings) throws IOException, RestException {
+    public void initClient(URL[] urls, Settings settings) throws IOException, RestException {
         if (restClient == null) {
-            restClient = new RestClient(restSpec, settings, addresses);
+            restClient = new RestClient(restSpec, settings, urls);
         }
     }
 

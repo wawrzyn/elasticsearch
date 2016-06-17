@@ -33,13 +33,6 @@ import org.elasticsearch.common.inject.Inject;
 import org.elasticsearch.common.settings.Settings;
 
 import java.io.IOException;
-import java.net.URI;
-import java.net.URISyntaxException;
-
-import static org.elasticsearch.cloud.azure.management.AzureComputeService.Management.KEYSTORE_PASSWORD;
-import static org.elasticsearch.cloud.azure.management.AzureComputeService.Management.KEYSTORE_PATH;
-import static org.elasticsearch.cloud.azure.management.AzureComputeService.Management.KEYSTORE_TYPE;
-import static org.elasticsearch.cloud.azure.management.AzureComputeService.Management.SUBSCRIPTION_ID;
 
 /**
  *
@@ -47,43 +40,31 @@ import static org.elasticsearch.cloud.azure.management.AzureComputeService.Manag
 public class AzureComputeServiceImpl extends AbstractLifecycleComponent<AzureComputeServiceImpl>
     implements AzureComputeService {
 
-    static final class Azure {
-        private static final String ENDPOINT = "https://management.core.windows.net/";
-    }
-
     private final ComputeManagementClient computeManagementClient;
     private final String serviceName;
 
     @Inject
     public AzureComputeServiceImpl(Settings settings) {
         super(settings);
-        String subscriptionId = settings.get(SUBSCRIPTION_ID);
+        String subscriptionId = Management.SUBSCRIPTION_ID_SETTING.get(settings);
 
-        serviceName = settings.get(Management.SERVICE_NAME);
-        String keystorePath = settings.get(KEYSTORE_PATH);
-        String keystorePassword = settings.get(KEYSTORE_PASSWORD);
-        String strKeyStoreType = settings.get(KEYSTORE_TYPE, KeyStoreType.pkcs12.name());
-        KeyStoreType tmpKeyStoreType = KeyStoreType.pkcs12;
-        try {
-            tmpKeyStoreType = KeyStoreType.fromString(strKeyStoreType);
-        } catch (Exception e) {
-            logger.warn("wrong value for [{}]: [{}]. falling back to [{}]...", KEYSTORE_TYPE,
-                    strKeyStoreType, KeyStoreType.pkcs12.name());
-        }
-        KeyStoreType keystoreType = tmpKeyStoreType;
+        serviceName = Management.SERVICE_NAME_SETTING.get(settings);
+        String keystorePath = Management.KEYSTORE_PATH_SETTING.get(settings);
+        String keystorePassword = Management.KEYSTORE_PASSWORD_SETTING.get(settings);
+        KeyStoreType keystoreType = Management.KEYSTORE_TYPE_SETTING.get(settings);
 
-        // Check that we have all needed properties
-        Configuration configuration;
-        try {
-            configuration = ManagementConfiguration.configure(new URI(Azure.ENDPOINT),
-                    subscriptionId, keystorePath, keystorePassword, keystoreType);
-        } catch (IOException|URISyntaxException e) {
-            logger.error("can not start azure client: {}", e.getMessage());
-            computeManagementClient = null;
-            return;
-        }
         logger.trace("creating new Azure client for [{}], [{}]", subscriptionId, serviceName);
-        computeManagementClient = ComputeManagementService.create(configuration);
+        ComputeManagementClient result;
+        try {
+            // Check that we have all needed properties
+            Configuration configuration = ManagementConfiguration.configure(Management.ENDPOINT_SETTING.get(settings),
+                subscriptionId, keystorePath, keystorePassword, keystoreType);
+            result = ComputeManagementService.create(configuration);
+        } catch (IOException e) {
+            logger.error("can not start azure client: {}", e.getMessage());
+            result = null;
+        }
+        this.computeManagementClient = result;
     }
 
     @Override

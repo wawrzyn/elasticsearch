@@ -19,6 +19,7 @@
 
 package org.elasticsearch.action.index;
 
+import org.elasticsearch.action.support.WriteRequestBuilder;
 import org.elasticsearch.action.support.replication.ReplicationRequestBuilder;
 import org.elasticsearch.client.ElasticsearchClient;
 import org.elasticsearch.common.Nullable;
@@ -33,7 +34,8 @@ import java.util.Map;
 /**
  * An index document action request builder.
  */
-public class IndexRequestBuilder extends ReplicationRequestBuilder<IndexRequest, IndexResponse, IndexRequestBuilder> {
+public class IndexRequestBuilder extends ReplicationRequestBuilder<IndexRequest, IndexResponse, IndexRequestBuilder>
+        implements WriteRequestBuilder<IndexRequestBuilder> {
 
     public IndexRequestBuilder(ElasticsearchClient client, IndexAction action) {
         super(client, action, new IndexRequest());
@@ -221,16 +223,6 @@ public class IndexRequestBuilder extends ReplicationRequestBuilder<IndexRequest,
     }
 
     /**
-     * Should a refresh be executed post this index operation causing the operation to
-     * be searchable. Note, heavy indexing should not set this to <tt>true</tt>. Defaults
-     * to <tt>false</tt>.
-     */
-    public IndexRequestBuilder setRefresh(boolean refresh) {
-        request.refresh(refresh);
-        return this;
-    }
-
-    /**
      * Sets the version, which will cause the index operation to only be performed if a matching
      * version exists and no changes happened on the doc since then.
      */
@@ -276,6 +268,14 @@ public class IndexRequestBuilder extends ReplicationRequestBuilder<IndexRequest,
      */
     public IndexRequestBuilder setTTL(TimeValue ttl) {
         request.ttl(ttl);
+        return this;
+    }
+
+    /**
+     * Sets the ingest pipeline to be executed before indexing the document
+     */
+    public IndexRequestBuilder setPipeline(String pipeline) {
+        request.setPipeline(pipeline);
         return this;
     }
 }

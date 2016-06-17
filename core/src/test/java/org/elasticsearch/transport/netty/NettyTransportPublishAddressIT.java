@@ -27,6 +27,7 @@ import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.transport.BoundTransportAddress;
 import org.elasticsearch.common.transport.InetSocketTransportAddress;
 import org.elasticsearch.common.transport.TransportAddress;
+import org.elasticsearch.node.Node;
 import org.elasticsearch.test.ESIntegTestCase;
 
 import java.net.Inet4Address;
@@ -46,7 +47,7 @@ public class NettyTransportPublishAddressIT extends ESIntegTestCase {
         return Settings.builder()
                 .put(super.nodeSettings(nodeOrdinal))
                 .put(NetworkModule.TRANSPORT_TYPE_KEY, "netty")
-                .put("node.mode", "network").build();
+                .put(Node.NODE_MODE_SETTING.getKey(), "network").build();
     }
 
     public void testDifferentPorts() throws Exception {
@@ -66,7 +67,7 @@ public class NettyTransportPublishAddressIT extends ESIntegTestCase {
 
         logger.info("--> checking if boundAddress matching publishAddress has same port");
         NodesInfoResponse nodesInfoResponse = client().admin().cluster().prepareNodesInfo().get();
-        for (NodeInfo nodeInfo : nodesInfoResponse) {
+        for (NodeInfo nodeInfo : nodesInfoResponse.getNodes()) {
             BoundTransportAddress boundTransportAddress = nodeInfo.getTransport().getAddress();
             if (nodeInfo.getNode().getName().equals(ipv4OnlyNode)) {
                 assertThat(boundTransportAddress.boundAddresses().length, equalTo(1));

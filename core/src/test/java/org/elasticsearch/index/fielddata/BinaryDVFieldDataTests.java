@@ -46,7 +46,7 @@ public class BinaryDVFieldDataTests extends AbstractFieldDataTestCase {
                 .startObject("properties")
                 .startObject("field")
                 .field("type", "binary")
-                .startObject("fielddata").field("format", "doc_values").endObject()
+                .field("doc_values", true)
                 .endObject()
                 .endObject()
                 .endObject().endObject().string();
@@ -107,12 +107,12 @@ public class BinaryDVFieldDataTests extends AbstractFieldDataTestCase {
     private byte[] randomBytes() {
         int size = randomIntBetween(10, 1000);
         byte[] bytes = new byte[size];
-        getRandom().nextBytes(bytes);
+        random().nextBytes(bytes);
         return bytes;
     }
 
     @Override
-    protected FieldDataType getFieldDataType() {
-        return new FieldDataType("binary", Settings.builder().put("format", "doc_values"));
+    protected String getFieldDataType() {
+        return "binary";
     }
 }

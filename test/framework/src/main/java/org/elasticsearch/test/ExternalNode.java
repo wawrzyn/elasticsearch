@@ -32,7 +32,7 @@ import org.elasticsearch.common.network.NetworkModule;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.transport.TransportAddress;
 import org.elasticsearch.discovery.DiscoveryModule;
-import org.elasticsearch.node.internal.InternalSettingsPreparer;
+import org.elasticsearch.node.Node;
 
 import java.io.Closeable;
 import java.io.IOException;
@@ -44,17 +44,14 @@ import java.util.Map;
 import java.util.Random;
 import java.util.concurrent.TimeUnit;
 
-import static org.elasticsearch.common.settings.Settings.settingsBuilder;
-
 /**
  * Simple helper class to start external nodes to be used within a test cluster
  */
 final class ExternalNode implements Closeable {
 
     public static final Settings REQUIRED_SETTINGS = Settings.builder()
-            .put(InternalSettingsPreparer.IGNORE_SYSTEM_PROPERTIES_SETTING, true)
-            .put(DiscoveryModule.DISCOVERY_TYPE_KEY, "zen")
-            .put("node.mode", "network").build(); // we need network mode for this
+            .put(DiscoveryModule.DISCOVERY_TYPE_SETTING.getKey(), "zen")
+            .put(Node.NODE_MODE_SETTING.getKey(), "network").build(); // we need network mode for this
 
     private final Path path;
     private final Random random;
@@ -101,8 +98,8 @@ final class ExternalNode implements Closeable {
         } else {
             params.add("bin/elasticsearch.bat");
         }
-        params.add("-Des.cluster.name=" + clusterName);
-        params.add("-Des.node.name=" + nodeName);
+        params.add("-Ecluster.name=" + clusterName);
+        params.add("-Enode.name=" + nodeName);
         Settings.Builder externaNodeSettingsBuilder = Settings.builder();
         for (Map.Entry<String, String> entry : settings.getAsMap().entrySet()) {
             switch (entry.getKey()) {
@@ -112,9 +109,9 @@ final class ExternalNode implements Closeable {
                 case "node.mode":
                 case "node.local":
                 case NetworkModule.TRANSPORT_TYPE_KEY:
-                case DiscoveryModule.DISCOVERY_TYPE_KEY:
+                case "discovery.type":
                 case NetworkModule.TRANSPORT_SERVICE_TYPE_KEY:
-                case InternalSettingsPreparer.IGNORE_SYSTEM_PROPERTIES_SETTING:
+                case "config.ignore_system_properties":
                     continue;
                 default:
                     externaNodeSettingsBuilder.put(entry.getKey(), entry.getValue());
@@ -123,11 +120,11 @@ final class ExternalNode implements Closeable {
         }
         this.externalNodeSettings = externaNodeSettingsBuilder.put(REQUIRED_SETTINGS).build();
         for (Map.Entry<String, String> entry : externalNodeSettings.getAsMap().entrySet()) {
-            params.add("-Des." + entry.getKey() + "=" + entry.getValue());
+            params.add("-E" + entry.getKey() + "=" + entry.getValue());
         }
 
-        params.add("-Des.path.home=" + PathUtils.get(".").toAbsolutePath());
-        params.add("-Des.path.conf=" + path + "/config");
+        params.add("-Epath.home=" + PathUtils.get(".").toAbsolutePath());
+        params.add("-Epath.conf=" + path + "/config");
 
         ProcessBuilder builder = new ProcessBuilder(params);
         builder.directory(path.toFile());
@@ -155,8 +152,7 @@ final class ExternalNode implements Closeable {
     static boolean waitForNode(final Client client, final String name) throws InterruptedException {
         return ESTestCase.awaitBusy(() -> {
             final NodesInfoResponse nodeInfos = client.admin().cluster().prepareNodesInfo().get();
-            final NodeInfo[] nodes = nodeInfos.getNodes();
-            for (NodeInfo info : nodes) {
+            for (NodeInfo info : nodeInfos.getNodes()) {
                 if (name.equals(info.getNode().getName())) {
                     return true;
                 }
@@ -167,8 +163,7 @@ final class ExternalNode implements Closeable {
 
     static NodeInfo nodeInfo(final Client client, final String nodeName) {
         final NodesInfoResponse nodeInfos = client.admin().cluster().prepareNodesInfo().get();
-        final NodeInfo[] nodes = nodeInfos.getNodes();
-        for (NodeInfo info : nodes) {
+        for (NodeInfo info : nodeInfos.getNodes()) {
             if (nodeName.equals(info.getNode().getName())) {
                 return info;
             }
@@ -191,10 +186,10 @@ final class ExternalNode implements Closeable {
             TransportAddress addr = nodeInfo.getTransport().getAddress().publishAddress();
             // verify that the end node setting will have network enabled.
 
-            Settings clientSettings = settingsBuilder().put(externalNodeSettings)
+            Settings clientSettings = Settings.builder().put(externalNodeSettings)
                     .put("client.transport.nodes_sampler_interval", "1s")
-                    .put("name", "transport_client_" + nodeInfo.getNode().name())
-                    .put(ClusterName.SETTING, clusterName).put("client.transport.sniff", false).build();
+                    .put("node.name", "transport_client_" + nodeInfo.getNode().getName())
+                    .put(ClusterName.CLUSTER_NAME_SETTING.getKey(), clusterName).put("client.transport.sniff", false).build();
             TransportClient client = TransportClient.builder().settings(clientSettings).build();
             client.addTransportAddress(addr);
             this.client = client;

@@ -33,9 +33,9 @@ import org.apache.lucene.search.Query;
 import org.apache.lucene.search.TermQuery;
 import org.apache.lucene.util.ArrayUtil;
 import org.apache.lucene.util.InPlaceMergeSorter;
-import org.apache.lucene.util.ToStringUtils;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
@@ -54,7 +54,7 @@ import java.util.Objects;
  * While aggregating the total term frequency is trivial since it
  * can be summed up not every {@link org.apache.lucene.search.similarities.Similarity}
  * makes use of this statistic. The document frequency which is used in the
- * {@link org.apache.lucene.search.similarities.DefaultSimilarity}
+ * {@link org.apache.lucene.search.similarities.ClassicSimilarity}
  * can only be estimated as an lower-bound since it is a document based statistic. For
  * the document frequency the maximum frequency across all fields per term is used
  * which is the minimum number of documents the terms occurs in.
@@ -237,6 +237,10 @@ public abstract class BlendedTermQuery extends Query {
         return newCtx;
     }
 
+    public List<Term> getTerms() {
+        return Arrays.asList(terms);
+    }
+
     @Override
     public String toString(String field) {
         StringBuilder builder = new StringBuilder("blended(terms:[");
@@ -246,14 +250,15 @@ public abstract class BlendedTermQuery extends Query {
             if (boosts != null) {
                 boost = boosts[i];
             }
-            builder.append(ToStringUtils.boost(boost));
+            if (boost != 1f) {
+                builder.append('^').append(boost);
+            }
             builder.append(", ");
         }
         if (terms.length > 0) {
             builder.setLength(builder.length() - 2);
         }
         builder.append("])");
-        builder.append(ToStringUtils.boost(getBoost()));
         return builder.toString();
     }
 
@@ -278,7 +283,7 @@ public abstract class BlendedTermQuery extends Query {
     @Override
     public boolean equals(Object o) {
         if (this == o) return true;
-        if (!super.equals(o)) return false;
+        if (sameClassAs(o) == false) return false;
 
         BlendedTermQuery that = (BlendedTermQuery) o;
         return Arrays.equals(equalsTerms(), that.equalsTerms());
@@ -286,7 +291,7 @@ public abstract class BlendedTermQuery extends Query {
 
     @Override
     public int hashCode() {
-        return Objects.hash(super.hashCode(), Arrays.hashCode(equalsTerms()));
+        return Objects.hash(classHash(), Arrays.hashCode(equalsTerms()));
     }
 
     public static BlendedTermQuery booleanBlendedQuery(Term[] terms, final boolean disableCoord) {
@@ -326,7 +331,7 @@ public abstract class BlendedTermQuery extends Query {
                     }
                     if ((maxTermFrequency >= 1f && docFreqs[i] > maxTermFrequency)
                             || (docFreqs[i] > (int) Math.ceil(maxTermFrequency
-                            * (float) maxDoc))) {
+                            * maxDoc))) {
                         highBuilder.add(query, BooleanClause.Occur.SHOULD);
                     } else {
                         lowBuilder.add(query, BooleanClause.Occur.SHOULD);
@@ -362,15 +367,15 @@ public abstract class BlendedTermQuery extends Query {
         return new BlendedTermQuery(terms, boosts) {
             @Override
             protected Query topLevelQuery(Term[] terms, TermContext[] ctx, int[] docFreqs, int maxDoc) {
-                DisjunctionMaxQuery disMaxQuery = new DisjunctionMaxQuery(tieBreakerMultiplier);
+                List<Query> queries = new ArrayList<>(ctx.length);
                 for (int i = 0; i < terms.length; i++) {
                     Query query = new TermQuery(terms[i], ctx[i]);
                     if (boosts != null && boosts[i] != 1f) {
                         query = new BoostQuery(query, boosts[i]);
                     }
-                    disMaxQuery.add(query);
+                    queries.add(query);
                 }
-                return disMaxQuery;
+                return new DisjunctionMaxQuery(queries, tieBreakerMultiplier);
             }
         };
     }

@@ -54,7 +54,7 @@ public class RestCountAction extends BaseRestHandler {
 
     @Inject
     public RestCountAction(Settings settings, RestController controller, Client client, IndicesQueriesRegistry indicesQueriesRegistry) {
-        super(settings, controller, client);
+        super(settings, client);
         controller.registerHandler(POST, "/_count", this);
         controller.registerHandler(GET, "/_count", this);
         controller.registerHandler(POST, "/{index}/_count", this);
@@ -74,7 +74,7 @@ public class RestCountAction extends BaseRestHandler {
             BytesReference restContent = RestActions.getRestContent(request);
             searchSourceBuilder.query(RestActions.getQueryContent(restContent, indicesQueriesRegistry, parseFieldMatcher));
         } else {
-            QueryBuilder<?> queryBuilder = RestActions.urlParamsToQueryBuilder(request);
+            QueryBuilder queryBuilder = RestActions.urlParamsToQueryBuilder(request);
             if (queryBuilder != null) {
                 searchSourceBuilder.query(queryBuilder);
             }

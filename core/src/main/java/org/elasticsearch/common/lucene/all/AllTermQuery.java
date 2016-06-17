@@ -42,9 +42,10 @@ import org.apache.lucene.search.similarities.Similarity;
 import org.apache.lucene.search.similarities.Similarity.SimScorer;
 import org.apache.lucene.search.similarities.Similarity.SimWeight;
 import org.apache.lucene.util.BytesRef;
-import org.apache.lucene.util.ToStringUtils;
+import org.apache.lucene.util.SmallFloat;
 
 import java.io.IOException;
+import java.util.Objects;
 import java.util.Set;
 
 /**
@@ -61,6 +62,19 @@ public final class AllTermQuery extends Query {
 
     public AllTermQuery(Term term) {
         this.term = term;
+    }
+
+    @Override
+    public boolean equals(Object obj) {
+        if (sameClassAs(obj) == false) {
+            return false;
+        }
+        return Objects.equals(term, ((AllTermQuery) obj).term);
+    }
+
+    @Override
+    public int hashCode() {
+        return 31 * classHash() + term.hashCode();
     }
 
     @Override
@@ -128,7 +142,8 @@ public final class AllTermQuery extends Query {
                         SimScorer docScorer = similarity.simScorer(stats, context);
                         Explanation freqExplanation = Explanation.match(freq, "termFreq=" + freq);
                         Explanation termScoreExplanation = docScorer.explain(doc, freqExplanation);
-                        Explanation payloadBoostExplanation = Explanation.match(scorer.payloadBoost(), "payloadBoost=" + scorer.payloadBoost());
+                        Explanation payloadBoostExplanation =
+                            Explanation.match(scorer.payloadBoost(), "payloadBoost=" + scorer.payloadBoost());
                         return Explanation.match(
                                 score,
                                 "weight(" + getQuery() + " in " + doc + ") ["
@@ -186,9 +201,14 @@ public final class AllTermQuery extends Query {
                     float boost;
                     if (payload == null) {
                         boost = 1;
-                    } else {
-                        assert payload.length == 4;
+                    } else if (payload.length == 1) {
+                        boost = SmallFloat.byte315ToFloat(payload.bytes[payload.offset]);
+                    } else if (payload.length == 4) {
+                        // TODO: for bw compat only, remove this in 6.0
                         boost = PayloadHelper.decodeFloat(payload.bytes, payload.offset);
+                    } else {
+                        throw new IllegalStateException("Payloads are expected to have a length of 1 or 4 but got: "
+                            + payload);
                     }
                     payloadBoost += boost;
                 }
@@ -221,7 +241,7 @@ public final class AllTermQuery extends Query {
 
     @Override
     public String toString(String field) {
-        return new TermQuery(term).toString(field) + ToStringUtils.boost(getBoost());
+        return new TermQuery(term).toString(field);
     }
 
 }

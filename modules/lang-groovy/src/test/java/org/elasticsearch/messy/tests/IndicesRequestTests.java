@@ -67,15 +67,9 @@ import org.elasticsearch.action.get.MultiGetAction;
 import org.elasticsearch.action.get.MultiGetRequest;
 import org.elasticsearch.action.index.IndexAction;
 import org.elasticsearch.action.index.IndexRequest;
-import org.elasticsearch.action.percolate.MultiPercolateAction;
-import org.elasticsearch.action.percolate.MultiPercolateRequest;
-import org.elasticsearch.action.percolate.PercolateAction;
-import org.elasticsearch.action.percolate.PercolateRequest;
 import org.elasticsearch.action.search.SearchRequest;
 import org.elasticsearch.action.search.SearchResponse;
 import org.elasticsearch.action.search.SearchType;
-import org.elasticsearch.action.suggest.SuggestAction;
-import org.elasticsearch.action.suggest.SuggestRequest;
 import org.elasticsearch.action.termvectors.MultiTermVectorsAction;
 import org.elasticsearch.action.termvectors.MultiTermVectorsRequest;
 import org.elasticsearch.action.termvectors.TermVectorsAction;
@@ -83,6 +77,7 @@ import org.elasticsearch.action.termvectors.TermVectorsRequest;
 import org.elasticsearch.action.update.UpdateAction;
 import org.elasticsearch.action.update.UpdateRequest;
 import org.elasticsearch.action.update.UpdateResponse;
+import org.elasticsearch.cluster.ClusterName;
 import org.elasticsearch.cluster.metadata.IndexNameExpressionResolver;
 import org.elasticsearch.common.inject.Inject;
 import org.elasticsearch.common.network.NetworkModule;
@@ -91,7 +86,8 @@ import org.elasticsearch.index.query.QueryBuilders;
 import org.elasticsearch.plugins.Plugin;
 import org.elasticsearch.script.Script;
 import org.elasticsearch.script.groovy.GroovyPlugin;
-import org.elasticsearch.search.action.SearchServiceTransportAction;
+import org.elasticsearch.search.action.SearchTransportService;
+import org.elasticsearch.tasks.Task;
 import org.elasticsearch.test.ESIntegTestCase;
 import org.elasticsearch.test.ESIntegTestCase.ClusterScope;
 import org.elasticsearch.test.ESIntegTestCase.Scope;
@@ -144,6 +140,9 @@ public class IndicesRequestTests extends ESIntegTestCase {
     protected Settings nodeSettings(int ordinal) {
         // must set this independently of the plugin so it overrides MockTransportService
         return Settings.builder().put(super.nodeSettings(ordinal))
+            // InternalClusterInfoService sends IndicesStatsRequest periodically which messes with this test
+            // this setting disables it...
+            .put("cluster.routing.allocation.disk.threshold_enabled", false)
             .put(NetworkModule.TRANSPORT_SERVICE_TYPE_KEY, "intercepting").build();
     }
 
@@ -176,7 +175,7 @@ public class IndicesRequestTests extends ESIntegTestCase {
 
         GetFieldMappingsRequest getFieldMappingsRequest = new GetFieldMappingsRequest();
         getFieldMappingsRequest.indices(randomIndicesOrAliases());
-        internalCluster().clientNodeClient().admin().indices().getFieldMappings(getFieldMappingsRequest).actionGet();
+        internalCluster().coordOnlyNodeClient().admin().indices().getFieldMappings(getFieldMappingsRequest).actionGet();
 
         clearInterceptedActions();
         assertSameIndices(getFieldMappingsRequest, getFieldMappingsShardAction);
@@ -188,7 +187,7 @@ public class IndicesRequestTests extends ESIntegTestCase {
 
         AnalyzeRequest analyzeRequest = new AnalyzeRequest(randomIndexOrAlias());
         analyzeRequest.text("text");
-        internalCluster().clientNodeClient().admin().indices().analyze(analyzeRequest).actionGet();
+        internalCluster().coordOnlyNodeClient().admin().indices().analyze(analyzeRequest).actionGet();
 
         clearInterceptedActions();
         assertSameIndices(analyzeRequest, analyzeShardAction);
@@ -199,7 +198,7 @@ public class IndicesRequestTests extends ESIntegTestCase {
         interceptTransportActions(indexShardActions);
 
         IndexRequest indexRequest = new IndexRequest(randomIndexOrAlias(), "type", "id").source("field", "value");
-        internalCluster().clientNodeClient().index(indexRequest).actionGet();
+        internalCluster().coordOnlyNodeClient().index(indexRequest).actionGet();
 
         clearInterceptedActions();
         assertSameIndices(indexRequest, indexShardActions);
@@ -210,7 +209,7 @@ public class IndicesRequestTests extends ESIntegTestCase {
         interceptTransportActions(deleteShardActions);
 
         DeleteRequest deleteRequest = new DeleteRequest(randomIndexOrAlias(), "type", "id");
-        internalCluster().clientNodeClient().delete(deleteRequest).actionGet();
+        internalCluster().coordOnlyNodeClient().delete(deleteRequest).actionGet();
 
         clearInterceptedActions();
         assertSameIndices(deleteRequest, deleteShardActions);
@@ -224,7 +223,7 @@ public class IndicesRequestTests extends ESIntegTestCase {
         String indexOrAlias = randomIndexOrAlias();
         client().prepareIndex(indexOrAlias, "type", "id").setSource("field", "value").get();
         UpdateRequest updateRequest = new UpdateRequest(indexOrAlias, "type", "id").doc("field1", "value1");
-        UpdateResponse updateResponse = internalCluster().clientNodeClient().update(updateRequest).actionGet();
+        UpdateResponse updateResponse = internalCluster().coordOnlyNodeClient().update(updateRequest).actionGet();
         assertThat(updateResponse.isCreated(), equalTo(false));
 
         clearInterceptedActions();
@@ -238,7 +237,7 @@ public class IndicesRequestTests extends ESIntegTestCase {
 
         String indexOrAlias = randomIndexOrAlias();
         UpdateRequest updateRequest = new UpdateRequest(indexOrAlias, "type", "id").upsert("field", "value").doc("field1", "value1");
-        UpdateResponse updateResponse = internalCluster().clientNodeClient().update(updateRequest).actionGet();
+        UpdateResponse updateResponse = internalCluster().coordOnlyNodeClient().update(updateRequest).actionGet();
         assertThat(updateResponse.isCreated(), equalTo(true));
 
         clearInterceptedActions();
@@ -253,7 +252,7 @@ public class IndicesRequestTests extends ESIntegTestCase {
         String indexOrAlias = randomIndexOrAlias();
         client().prepareIndex(indexOrAlias, "type", "id").setSource("field", "value").get();
         UpdateRequest updateRequest = new UpdateRequest(indexOrAlias, "type", "id").script(new Script("ctx.op='delete'"));
-        UpdateResponse updateResponse = internalCluster().clientNodeClient().update(updateRequest).actionGet();
+        UpdateResponse updateResponse = internalCluster().coordOnlyNodeClient().update(updateRequest).actionGet();
         assertThat(updateResponse.isCreated(), equalTo(false));
 
         clearInterceptedActions();
@@ -285,7 +284,7 @@ public class IndicesRequestTests extends ESIntegTestCase {
             indices.add(indexOrAlias);
         }
 
-        internalCluster().clientNodeClient().bulk(bulkRequest).actionGet();
+        internalCluster().coordOnlyNodeClient().bulk(bulkRequest).actionGet();
 
         clearInterceptedActions();
         assertIndicesSubset(indices, bulkShardActions);
@@ -296,7 +295,7 @@ public class IndicesRequestTests extends ESIntegTestCase {
         interceptTransportActions(getShardAction);
 
         GetRequest getRequest = new GetRequest(randomIndexOrAlias(), "type", "id");
-        internalCluster().clientNodeClient().get(getRequest).actionGet();
+        internalCluster().coordOnlyNodeClient().get(getRequest).actionGet();
 
         clearInterceptedActions();
         assertSameIndices(getRequest, getShardAction);
@@ -307,7 +306,7 @@ public class IndicesRequestTests extends ESIntegTestCase {
         interceptTransportActions(explainShardAction);
 
         ExplainRequest explainRequest = new ExplainRequest(randomIndexOrAlias(), "type", "id").query(QueryBuilders.matchAllQuery());
-        internalCluster().clientNodeClient().explain(explainRequest).actionGet();
+        internalCluster().coordOnlyNodeClient().explain(explainRequest).actionGet();
 
         clearInterceptedActions();
         assertSameIndices(explainRequest, explainShardAction);
@@ -318,7 +317,7 @@ public class IndicesRequestTests extends ESIntegTestCase {
         interceptTransportActions(termVectorShardAction);
 
         TermVectorsRequest termVectorsRequest = new TermVectorsRequest(randomIndexOrAlias(), "type", "id");
-        internalCluster().clientNodeClient().termVectors(termVectorsRequest).actionGet();
+        internalCluster().coordOnlyNodeClient().termVectors(termVectorsRequest).actionGet();
 
         clearInterceptedActions();
         assertSameIndices(termVectorsRequest, termVectorShardAction);
@@ -336,7 +335,7 @@ public class IndicesRequestTests extends ESIntegTestCase {
             multiTermVectorsRequest.add(indexOrAlias, "type", Integer.toString(i));
             indices.add(indexOrAlias);
         }
-        internalCluster().clientNodeClient().multiTermVectors(multiTermVectorsRequest).actionGet();
+        internalCluster().coordOnlyNodeClient().multiTermVectors(multiTermVectorsRequest).actionGet();
 
         clearInterceptedActions();
         assertIndicesSubset(indices, multiTermVectorsShardAction);
@@ -354,7 +353,7 @@ public class IndicesRequestTests extends ESIntegTestCase {
             multiGetRequest.add(indexOrAlias, "type", Integer.toString(i));
             indices.add(indexOrAlias);
         }
-        internalCluster().clientNodeClient().multiGet(multiGetRequest).actionGet();
+        internalCluster().coordOnlyNodeClient().multiGet(multiGetRequest).actionGet();
 
         clearInterceptedActions();
         assertIndicesSubset(indices, multiGetShardAction);
@@ -365,10 +364,10 @@ public class IndicesRequestTests extends ESIntegTestCase {
         interceptTransportActions(indexShardActions);
 
         FlushRequest flushRequest = new FlushRequest(randomIndicesOrAliases());
-        internalCluster().clientNodeClient().admin().indices().flush(flushRequest).actionGet();
+        internalCluster().coordOnlyNodeClient().admin().indices().flush(flushRequest).actionGet();
 
         clearInterceptedActions();
-        String[] indices = new IndexNameExpressionResolver(Settings.EMPTY).concreteIndices(client().admin().cluster().prepareState().get().getState(), flushRequest);
+        String[] indices = new IndexNameExpressionResolver(Settings.EMPTY).concreteIndexNames(client().admin().cluster().prepareState().get().getState(), flushRequest);
         assertIndicesSubset(Arrays.asList(indices), indexShardActions);
     }
 
@@ -377,7 +376,7 @@ public class IndicesRequestTests extends ESIntegTestCase {
         interceptTransportActions(mergeShardAction);
 
         ForceMergeRequest mergeRequest = new ForceMergeRequest(randomIndicesOrAliases());
-        internalCluster().clientNodeClient().admin().indices().forceMerge(mergeRequest).actionGet();
+        internalCluster().coordOnlyNodeClient().admin().indices().forceMerge(mergeRequest).actionGet();
 
         clearInterceptedActions();
         assertSameIndices(mergeRequest, mergeShardAction);
@@ -388,10 +387,10 @@ public class IndicesRequestTests extends ESIntegTestCase {
         interceptTransportActions(indexShardActions);
 
         RefreshRequest refreshRequest = new RefreshRequest(randomIndicesOrAliases());
-        internalCluster().clientNodeClient().admin().indices().refresh(refreshRequest).actionGet();
+        internalCluster().coordOnlyNodeClient().admin().indices().refresh(refreshRequest).actionGet();
 
         clearInterceptedActions();
-        String[] indices = new IndexNameExpressionResolver(Settings.EMPTY).concreteIndices(client().admin().cluster().prepareState().get().getState(), refreshRequest);
+        String[] indices = new IndexNameExpressionResolver(Settings.EMPTY).concreteIndexNames(client().admin().cluster().prepareState().get().getState(), refreshRequest);
         assertIndicesSubset(Arrays.asList(indices), indexShardActions);
     }
 
@@ -400,7 +399,7 @@ public class IndicesRequestTests extends ESIntegTestCase {
         interceptTransportActions(clearCacheAction);
 
         ClearIndicesCacheRequest clearIndicesCacheRequest = new ClearIndicesCacheRequest(randomIndicesOrAliases());
-        internalCluster().clientNodeClient().admin().indices().clearCache(clearIndicesCacheRequest).actionGet();
+        internalCluster().coordOnlyNodeClient().admin().indices().clearCache(clearIndicesCacheRequest).actionGet();
 
         clearInterceptedActions();
         assertSameIndices(clearIndicesCacheRequest, clearCacheAction);
@@ -411,7 +410,7 @@ public class IndicesRequestTests extends ESIntegTestCase {
         interceptTransportActions(recoveryAction);
 
         RecoveryRequest recoveryRequest = new RecoveryRequest(randomIndicesOrAliases());
-        internalCluster().clientNodeClient().admin().indices().recoveries(recoveryRequest).actionGet();
+        internalCluster().coordOnlyNodeClient().admin().indices().recoveries(recoveryRequest).actionGet();
 
         clearInterceptedActions();
         assertSameIndices(recoveryRequest, recoveryAction);
@@ -422,7 +421,7 @@ public class IndicesRequestTests extends ESIntegTestCase {
         interceptTransportActions(segmentsAction);
 
         IndicesSegmentsRequest segmentsRequest = new IndicesSegmentsRequest(randomIndicesOrAliases());
-        internalCluster().clientNodeClient().admin().indices().segments(segmentsRequest).actionGet();
+        internalCluster().coordOnlyNodeClient().admin().indices().segments(segmentsRequest).actionGet();
 
         clearInterceptedActions();
         assertSameIndices(segmentsRequest, segmentsAction);
@@ -433,21 +432,10 @@ public class IndicesRequestTests extends ESIntegTestCase {
         interceptTransportActions(indicesStats);
 
         IndicesStatsRequest indicesStatsRequest = new IndicesStatsRequest().indices(randomIndicesOrAliases());
-        internalCluster().clientNodeClient().admin().indices().stats(indicesStatsRequest).actionGet();
+        internalCluster().coordOnlyNodeClient().admin().indices().stats(indicesStatsRequest).actionGet();
 
         clearInterceptedActions();
         assertSameIndices(indicesStatsRequest, indicesStats);
-    }
-
-    public void testSuggest() {
-        String suggestAction = SuggestAction.NAME + "[s]";
-        interceptTransportActions(suggestAction);
-
-        SuggestRequest suggestRequest = new SuggestRequest(randomIndicesOrAliases());
-        internalCluster().clientNodeClient().suggest(suggestRequest).actionGet();
-
-        clearInterceptedActions();
-        assertSameIndices(suggestRequest, suggestAction);
     }
 
     public void testValidateQuery() {
@@ -455,62 +443,17 @@ public class IndicesRequestTests extends ESIntegTestCase {
         interceptTransportActions(validateQueryShardAction);
 
         ValidateQueryRequest validateQueryRequest = new ValidateQueryRequest(randomIndicesOrAliases());
-        internalCluster().clientNodeClient().admin().indices().validateQuery(validateQueryRequest).actionGet();
+        internalCluster().coordOnlyNodeClient().admin().indices().validateQuery(validateQueryRequest).actionGet();
 
         clearInterceptedActions();
         assertSameIndices(validateQueryRequest, validateQueryShardAction);
-    }
-
-    public void testPercolate() {
-        String percolateShardAction = PercolateAction.NAME + "[s]";
-        interceptTransportActions(percolateShardAction);
-
-        client().prepareIndex("test-get", "type", "1").setSource("field","value").get();
-
-        PercolateRequest percolateRequest = new PercolateRequest().indices(randomIndicesOrAliases()).documentType("type");
-        if (randomBoolean()) {
-            percolateRequest.getRequest(new GetRequest("test-get", "type", "1"));
-        } else {
-            percolateRequest.source("\"field\":\"value\"");
-        }
-        internalCluster().clientNodeClient().percolate(percolateRequest).actionGet();
-
-        clearInterceptedActions();
-        assertSameIndices(percolateRequest, percolateShardAction);
-    }
-
-    public void testMultiPercolate() {
-        String multiPercolateShardAction = MultiPercolateAction.NAME + "[shard][s]";
-        interceptTransportActions(multiPercolateShardAction);
-
-        client().prepareIndex("test-get", "type", "1").setSource("field", "value").get();
-
-        MultiPercolateRequest multiPercolateRequest = new MultiPercolateRequest();
-        List<String> indices = new ArrayList<>();
-        int numRequests = iterations(1, 30);
-        for (int i = 0; i < numRequests; i++) {
-            String[] indicesOrAliases = randomIndicesOrAliases();
-            Collections.addAll(indices, indicesOrAliases);
-            PercolateRequest percolateRequest = new PercolateRequest().indices(indicesOrAliases).documentType("type");
-            if (randomBoolean()) {
-                percolateRequest.getRequest(new GetRequest("test-get", "type", "1"));
-            } else {
-                percolateRequest.source("\"field\":\"value\"");
-            }
-            multiPercolateRequest.add(percolateRequest);
-        }
-
-        internalCluster().clientNodeClient().multiPercolate(multiPercolateRequest).actionGet();
-
-        clearInterceptedActions();
-        assertIndicesSubset(indices, multiPercolateShardAction);
     }
 
     public void testOpenIndex() {
         interceptTransportActions(OpenIndexAction.NAME);
 
         OpenIndexRequest openIndexRequest = new OpenIndexRequest(randomUniqueIndicesOrAliases());
-        internalCluster().clientNodeClient().admin().indices().open(openIndexRequest).actionGet();
+        internalCluster().coordOnlyNodeClient().admin().indices().open(openIndexRequest).actionGet();
 
         clearInterceptedActions();
         assertSameIndices(openIndexRequest, OpenIndexAction.NAME);
@@ -520,7 +463,7 @@ public class IndicesRequestTests extends ESIntegTestCase {
         interceptTransportActions(CloseIndexAction.NAME);
 
         CloseIndexRequest closeIndexRequest = new CloseIndexRequest(randomUniqueIndicesOrAliases());
-        internalCluster().clientNodeClient().admin().indices().close(closeIndexRequest).actionGet();
+        internalCluster().coordOnlyNodeClient().admin().indices().close(closeIndexRequest).actionGet();
 
         clearInterceptedActions();
         assertSameIndices(closeIndexRequest, CloseIndexAction.NAME);
@@ -531,7 +474,7 @@ public class IndicesRequestTests extends ESIntegTestCase {
 
         String[] randomIndicesOrAliases = randomUniqueIndicesOrAliases();
         DeleteIndexRequest deleteIndexRequest = new DeleteIndexRequest(randomIndicesOrAliases);
-        assertAcked(internalCluster().clientNodeClient().admin().indices().delete(deleteIndexRequest).actionGet());
+        assertAcked(internalCluster().coordOnlyNodeClient().admin().indices().delete(deleteIndexRequest).actionGet());
 
         clearInterceptedActions();
         assertSameIndices(deleteIndexRequest, DeleteIndexAction.NAME);
@@ -541,7 +484,7 @@ public class IndicesRequestTests extends ESIntegTestCase {
         interceptTransportActions(GetMappingsAction.NAME);
 
         GetMappingsRequest getMappingsRequest = new GetMappingsRequest().indices(randomIndicesOrAliases());
-        internalCluster().clientNodeClient().admin().indices().getMappings(getMappingsRequest).actionGet();
+        internalCluster().coordOnlyNodeClient().admin().indices().getMappings(getMappingsRequest).actionGet();
 
         clearInterceptedActions();
         assertSameIndices(getMappingsRequest, GetMappingsAction.NAME);
@@ -550,8 +493,8 @@ public class IndicesRequestTests extends ESIntegTestCase {
     public void testPutMapping() {
         interceptTransportActions(PutMappingAction.NAME);
 
-        PutMappingRequest putMappingRequest = new PutMappingRequest(randomUniqueIndicesOrAliases()).type("type").source("field", "type=string");
-        internalCluster().clientNodeClient().admin().indices().putMapping(putMappingRequest).actionGet();
+        PutMappingRequest putMappingRequest = new PutMappingRequest(randomUniqueIndicesOrAliases()).type("type").source("field", "type=text");
+        internalCluster().coordOnlyNodeClient().admin().indices().putMapping(putMappingRequest).actionGet();
 
         clearInterceptedActions();
         assertSameIndices(putMappingRequest, PutMappingAction.NAME);
@@ -561,7 +504,7 @@ public class IndicesRequestTests extends ESIntegTestCase {
         interceptTransportActions(GetSettingsAction.NAME);
 
         GetSettingsRequest getSettingsRequest = new GetSettingsRequest().indices(randomIndicesOrAliases());
-        internalCluster().clientNodeClient().admin().indices().getSettings(getSettingsRequest).actionGet();
+        internalCluster().coordOnlyNodeClient().admin().indices().getSettings(getSettingsRequest).actionGet();
 
         clearInterceptedActions();
         assertSameIndices(getSettingsRequest, GetSettingsAction.NAME);
@@ -571,15 +514,15 @@ public class IndicesRequestTests extends ESIntegTestCase {
         interceptTransportActions(UpdateSettingsAction.NAME);
 
         UpdateSettingsRequest updateSettingsRequest = new UpdateSettingsRequest(randomIndicesOrAliases()).settings(Settings.builder().put("refresh_interval", -1));
-        internalCluster().clientNodeClient().admin().indices().updateSettings(updateSettingsRequest).actionGet();
+        internalCluster().coordOnlyNodeClient().admin().indices().updateSettings(updateSettingsRequest).actionGet();
 
         clearInterceptedActions();
         assertSameIndices(updateSettingsRequest, UpdateSettingsAction.NAME);
     }
 
     public void testSearchQueryThenFetch() throws Exception {
-        interceptTransportActions(SearchServiceTransportAction.QUERY_ACTION_NAME,
-                SearchServiceTransportAction.FETCH_ID_ACTION_NAME, SearchServiceTransportAction.FREE_CONTEXT_ACTION_NAME);
+        interceptTransportActions(SearchTransportService.QUERY_ACTION_NAME,
+                SearchTransportService.FETCH_ID_ACTION_NAME, SearchTransportService.FREE_CONTEXT_ACTION_NAME);
 
         String[] randomIndicesOrAliases = randomIndicesOrAliases();
         for (int i = 0; i < randomIndicesOrAliases.length; i++) {
@@ -588,19 +531,19 @@ public class IndicesRequestTests extends ESIntegTestCase {
         refresh();
 
         SearchRequest searchRequest = new SearchRequest(randomIndicesOrAliases).searchType(SearchType.QUERY_THEN_FETCH);
-        SearchResponse searchResponse = internalCluster().clientNodeClient().search(searchRequest).actionGet();
+        SearchResponse searchResponse = internalCluster().coordOnlyNodeClient().search(searchRequest).actionGet();
         assertNoFailures(searchResponse);
-        assertThat(searchResponse.getHits().totalHits(), greaterThan(0l));
+        assertThat(searchResponse.getHits().totalHits(), greaterThan(0L));
 
         clearInterceptedActions();
-        assertSameIndices(searchRequest, SearchServiceTransportAction.QUERY_ACTION_NAME, SearchServiceTransportAction.FETCH_ID_ACTION_NAME);
+        assertSameIndices(searchRequest, SearchTransportService.QUERY_ACTION_NAME, SearchTransportService.FETCH_ID_ACTION_NAME);
         //free context messages are not necessarily sent, but if they are, check their indices
-        assertSameIndicesOptionalRequests(searchRequest, SearchServiceTransportAction.FREE_CONTEXT_ACTION_NAME);
+        assertSameIndicesOptionalRequests(searchRequest, SearchTransportService.FREE_CONTEXT_ACTION_NAME);
     }
 
     public void testSearchDfsQueryThenFetch() throws Exception {
-        interceptTransportActions(SearchServiceTransportAction.DFS_ACTION_NAME, SearchServiceTransportAction.QUERY_ID_ACTION_NAME,
-                SearchServiceTransportAction.FETCH_ID_ACTION_NAME, SearchServiceTransportAction.FREE_CONTEXT_ACTION_NAME);
+        interceptTransportActions(SearchTransportService.DFS_ACTION_NAME, SearchTransportService.QUERY_ID_ACTION_NAME,
+                SearchTransportService.FETCH_ID_ACTION_NAME, SearchTransportService.FREE_CONTEXT_ACTION_NAME);
 
         String[] randomIndicesOrAliases = randomIndicesOrAliases();
         for (int i = 0; i < randomIndicesOrAliases.length; i++) {
@@ -609,20 +552,20 @@ public class IndicesRequestTests extends ESIntegTestCase {
         refresh();
 
         SearchRequest searchRequest = new SearchRequest(randomIndicesOrAliases).searchType(SearchType.DFS_QUERY_THEN_FETCH);
-        SearchResponse searchResponse = internalCluster().clientNodeClient().search(searchRequest).actionGet();
+        SearchResponse searchResponse = internalCluster().coordOnlyNodeClient().search(searchRequest).actionGet();
         assertNoFailures(searchResponse);
-        assertThat(searchResponse.getHits().totalHits(), greaterThan(0l));
+        assertThat(searchResponse.getHits().totalHits(), greaterThan(0L));
 
         clearInterceptedActions();
-        assertSameIndices(searchRequest, SearchServiceTransportAction.DFS_ACTION_NAME, SearchServiceTransportAction.QUERY_ID_ACTION_NAME,
-                SearchServiceTransportAction.FETCH_ID_ACTION_NAME);
+        assertSameIndices(searchRequest, SearchTransportService.DFS_ACTION_NAME, SearchTransportService.QUERY_ID_ACTION_NAME,
+                SearchTransportService.FETCH_ID_ACTION_NAME);
         //free context messages are not necessarily sent, but if they are, check their indices
-        assertSameIndicesOptionalRequests(searchRequest, SearchServiceTransportAction.FREE_CONTEXT_ACTION_NAME);
+        assertSameIndicesOptionalRequests(searchRequest, SearchTransportService.FREE_CONTEXT_ACTION_NAME);
     }
 
     public void testSearchQueryAndFetch() throws Exception {
-        interceptTransportActions(SearchServiceTransportAction.QUERY_FETCH_ACTION_NAME,
-                SearchServiceTransportAction.FREE_CONTEXT_ACTION_NAME);
+        interceptTransportActions(SearchTransportService.QUERY_FETCH_ACTION_NAME,
+                SearchTransportService.FREE_CONTEXT_ACTION_NAME);
 
         String[] randomIndicesOrAliases = randomIndicesOrAliases();
         for (int i = 0; i < randomIndicesOrAliases.length; i++) {
@@ -631,19 +574,19 @@ public class IndicesRequestTests extends ESIntegTestCase {
         refresh();
 
         SearchRequest searchRequest = new SearchRequest(randomIndicesOrAliases).searchType(SearchType.QUERY_AND_FETCH);
-        SearchResponse searchResponse = internalCluster().clientNodeClient().search(searchRequest).actionGet();
+        SearchResponse searchResponse = internalCluster().coordOnlyNodeClient().search(searchRequest).actionGet();
         assertNoFailures(searchResponse);
-        assertThat(searchResponse.getHits().totalHits(), greaterThan(0l));
+        assertThat(searchResponse.getHits().totalHits(), greaterThan(0L));
 
         clearInterceptedActions();
-        assertSameIndices(searchRequest, SearchServiceTransportAction.QUERY_FETCH_ACTION_NAME);
+        assertSameIndices(searchRequest, SearchTransportService.QUERY_FETCH_ACTION_NAME);
         //free context messages are not necessarily sent, but if they are, check their indices
-        assertSameIndicesOptionalRequests(searchRequest, SearchServiceTransportAction.FREE_CONTEXT_ACTION_NAME);
+        assertSameIndicesOptionalRequests(searchRequest, SearchTransportService.FREE_CONTEXT_ACTION_NAME);
     }
 
     public void testSearchDfsQueryAndFetch() throws Exception {
-        interceptTransportActions(SearchServiceTransportAction.QUERY_QUERY_FETCH_ACTION_NAME,
-                SearchServiceTransportAction.FREE_CONTEXT_ACTION_NAME);
+        interceptTransportActions(SearchTransportService.QUERY_QUERY_FETCH_ACTION_NAME,
+                SearchTransportService.FREE_CONTEXT_ACTION_NAME);
 
         String[] randomIndicesOrAliases = randomIndicesOrAliases();
         for (int i = 0; i < randomIndicesOrAliases.length; i++) {
@@ -652,14 +595,14 @@ public class IndicesRequestTests extends ESIntegTestCase {
         refresh();
 
         SearchRequest searchRequest = new SearchRequest(randomIndicesOrAliases).searchType(SearchType.DFS_QUERY_AND_FETCH);
-        SearchResponse searchResponse = internalCluster().clientNodeClient().search(searchRequest).actionGet();
+        SearchResponse searchResponse = internalCluster().coordOnlyNodeClient().search(searchRequest).actionGet();
         assertNoFailures(searchResponse);
-        assertThat(searchResponse.getHits().totalHits(), greaterThan(0l));
+        assertThat(searchResponse.getHits().totalHits(), greaterThan(0L));
 
         clearInterceptedActions();
-        assertSameIndices(searchRequest, SearchServiceTransportAction.QUERY_QUERY_FETCH_ACTION_NAME);
+        assertSameIndices(searchRequest, SearchTransportService.QUERY_QUERY_FETCH_ACTION_NAME);
         //free context messages are not necessarily sent, but if they are, check their indices
-        assertSameIndicesOptionalRequests(searchRequest, SearchServiceTransportAction.FREE_CONTEXT_ACTION_NAME);
+        assertSameIndicesOptionalRequests(searchRequest, SearchTransportService.FREE_CONTEXT_ACTION_NAME);
     }
 
     private static void assertSameIndices(IndicesRequest originalRequest, String... actions) {
@@ -765,14 +708,7 @@ public class IndicesRequestTests extends ESIntegTestCase {
     public static class InterceptingTransportService extends TransportService {
 
         public static class TestPlugin extends Plugin {
-            @Override
-            public String name() {
-                return "intercepting-transport-service";
-            }
-            @Override
-            public String description() {
-                return "an intercepting transport service for testing";
-            }
+
             public void onModule(NetworkModule module) {
                 module.registerTransportService("intercepting", InterceptingTransportService.class);
             }
@@ -800,8 +736,8 @@ public class IndicesRequestTests extends ESIntegTestCase {
         }
 
         @Override
-        public <Request extends TransportRequest> void registerRequestHandler(String action, Supplier<Request> request, String executor, boolean forceExecution, TransportRequestHandler<Request> handler) {
-            super.registerRequestHandler(action, request, executor, forceExecution, new InterceptingRequestHandler<>(action, handler));
+        public <Request extends TransportRequest> void registerRequestHandler(String action, Supplier<Request> request, String executor, boolean forceExecution, boolean canTripCircuitBreaker, TransportRequestHandler<Request> handler) {
+            super.registerRequestHandler(action, request, executor, forceExecution, canTripCircuitBreaker, new InterceptingRequestHandler<>(action, handler));
         }
 
         @Override
@@ -820,7 +756,7 @@ public class IndicesRequestTests extends ESIntegTestCase {
             }
 
             @Override
-            public void messageReceived(T request, TransportChannel channel) throws Exception {
+            public void messageReceived(T request, TransportChannel channel, Task task) throws Exception {
                 synchronized (InterceptingTransportService.this) {
                     if (actions.contains(action)) {
                         List<TransportRequest> requestList = requests.get(action);
@@ -833,7 +769,12 @@ public class IndicesRequestTests extends ESIntegTestCase {
                         }
                     }
                 }
-                requestHandler.messageReceived(request, channel);
+                requestHandler.messageReceived(request, channel, task);
+            }
+
+            @Override
+            public void messageReceived(T request, TransportChannel channel) throws Exception {
+                messageReceived(request, channel, null);
             }
         }
     }

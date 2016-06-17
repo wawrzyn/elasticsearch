@@ -19,10 +19,10 @@
 package org.elasticsearch.test;
 
 import com.carrotsearch.randomizedtesting.RandomizedContext;
-import com.carrotsearch.randomizedtesting.RandomizedTest;
 import com.carrotsearch.randomizedtesting.annotations.TestGroup;
 import com.carrotsearch.randomizedtesting.generators.RandomInts;
 import com.carrotsearch.randomizedtesting.generators.RandomPicks;
+import org.apache.http.impl.client.CloseableHttpClient;
 import org.apache.http.impl.client.HttpClients;
 import org.apache.lucene.util.IOUtils;
 import org.apache.lucene.util.LuceneTestCase;
@@ -41,13 +41,13 @@ import org.elasticsearch.action.admin.indices.create.CreateIndexRequestBuilder;
 import org.elasticsearch.action.admin.indices.exists.indices.IndicesExistsResponse;
 import org.elasticsearch.action.admin.indices.flush.FlushResponse;
 import org.elasticsearch.action.admin.indices.forcemerge.ForceMergeResponse;
+import org.elasticsearch.action.admin.indices.get.GetIndexResponse;
 import org.elasticsearch.action.admin.indices.mapping.get.GetMappingsResponse;
 import org.elasticsearch.action.admin.indices.refresh.RefreshResponse;
 import org.elasticsearch.action.admin.indices.segments.IndicesSegmentResponse;
 import org.elasticsearch.action.admin.indices.template.put.PutIndexTemplateRequestBuilder;
 import org.elasticsearch.action.bulk.BulkRequestBuilder;
 import org.elasticsearch.action.bulk.BulkResponse;
-import org.elasticsearch.action.delete.DeleteResponse;
 import org.elasticsearch.action.get.GetResponse;
 import org.elasticsearch.action.index.IndexRequestBuilder;
 import org.elasticsearch.action.index.IndexResponse;
@@ -57,7 +57,6 @@ import org.elasticsearch.action.support.IndicesOptions;
 import org.elasticsearch.client.AdminClient;
 import org.elasticsearch.client.Client;
 import org.elasticsearch.client.Requests;
-import org.elasticsearch.cluster.ClusterService;
 import org.elasticsearch.cluster.ClusterState;
 import org.elasticsearch.cluster.health.ClusterHealthStatus;
 import org.elasticsearch.cluster.metadata.IndexMetaData;
@@ -69,13 +68,17 @@ import org.elasticsearch.cluster.routing.ShardRouting;
 import org.elasticsearch.cluster.routing.UnassignedInfo;
 import org.elasticsearch.cluster.routing.allocation.decider.DiskThresholdDecider;
 import org.elasticsearch.cluster.routing.allocation.decider.EnableAllocationDecider;
+import org.elasticsearch.cluster.service.ClusterService;
 import org.elasticsearch.common.Nullable;
 import org.elasticsearch.common.Priority;
 import org.elasticsearch.common.Strings;
 import org.elasticsearch.common.collect.ImmutableOpenMap;
 import org.elasticsearch.common.collect.Tuple;
 import org.elasticsearch.common.network.NetworkAddress;
+import org.elasticsearch.common.network.NetworkModule;
 import org.elasticsearch.common.regex.Regex;
+import org.elasticsearch.common.settings.Setting;
+import org.elasticsearch.common.settings.Setting.Property;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.transport.InetSocketTransportAddress;
 import org.elasticsearch.common.transport.TransportAddress;
@@ -93,28 +96,26 @@ import org.elasticsearch.discovery.Discovery;
 import org.elasticsearch.discovery.zen.ZenDiscovery;
 import org.elasticsearch.discovery.zen.elect.ElectMasterService;
 import org.elasticsearch.env.Environment;
+import org.elasticsearch.index.Index;
+import org.elasticsearch.index.IndexModule;
 import org.elasticsearch.index.IndexService;
-import org.elasticsearch.index.MockEngineFactoryPlugin;
 import org.elasticsearch.index.IndexSettings;
+import org.elasticsearch.index.MergePolicyConfig;
+import org.elasticsearch.index.MergeSchedulerConfig;
+import org.elasticsearch.index.MockEngineFactoryPlugin;
 import org.elasticsearch.index.codec.CodecService;
 import org.elasticsearch.index.mapper.DocumentMapper;
-import org.elasticsearch.index.mapper.MappedFieldType;
-import org.elasticsearch.index.mapper.MappedFieldType.Loading;
 import org.elasticsearch.index.mapper.internal.TimestampFieldMapper;
-import org.elasticsearch.index.shard.IndexShard;
-import org.elasticsearch.index.shard.MergePolicyConfig;
-import org.elasticsearch.index.shard.MergeSchedulerConfig;
 import org.elasticsearch.index.translog.Translog;
+import org.elasticsearch.indices.IndicesQueryCache;
+import org.elasticsearch.indices.IndicesRequestCache;
 import org.elasticsearch.indices.IndicesService;
-import org.elasticsearch.indices.cache.request.IndicesRequestCache;
 import org.elasticsearch.indices.store.IndicesStore;
-import org.elasticsearch.node.Node;
 import org.elasticsearch.node.NodeMocksPlugin;
 import org.elasticsearch.plugins.Plugin;
 import org.elasticsearch.rest.RestStatus;
 import org.elasticsearch.search.MockSearchService;
 import org.elasticsearch.search.SearchHit;
-import org.elasticsearch.search.SearchService;
 import org.elasticsearch.test.client.RandomizingClient;
 import org.elasticsearch.test.disruption.ServiceDisruptionScheme;
 import org.elasticsearch.test.rest.client.http.HttpRequestBuilder;
@@ -122,7 +123,6 @@ import org.elasticsearch.test.store.MockFSIndexStore;
 import org.elasticsearch.test.transport.AssertingLocalTransport;
 import org.elasticsearch.test.transport.MockTransportService;
 import org.hamcrest.Matchers;
-import org.joda.time.DateTimeZone;
 import org.junit.After;
 import org.junit.AfterClass;
 import org.junit.Before;
@@ -160,11 +160,11 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.BooleanSupplier;
+import java.util.function.Function;
 
 import static org.elasticsearch.client.Requests.syncedFlushRequest;
 import static org.elasticsearch.cluster.metadata.IndexMetaData.SETTING_NUMBER_OF_REPLICAS;
 import static org.elasticsearch.cluster.metadata.IndexMetaData.SETTING_NUMBER_OF_SHARDS;
-import static org.elasticsearch.common.settings.Settings.settingsBuilder;
 import static org.elasticsearch.common.util.CollectionUtils.eagerPartition;
 import static org.elasticsearch.index.query.QueryBuilders.matchAllQuery;
 import static org.elasticsearch.test.XContentTestUtils.convertToMap;
@@ -195,7 +195,7 @@ import static org.hamcrest.Matchers.startsWith;
  * should be used, here is an example:
  * <pre>
  *
- * {@literal @}ClusterScope(scope=Scope.TEST) public class SomeIT extends ESIntegTestCase {
+ * {@literal @}NodeScope(scope=Scope.TEST) public class SomeIT extends ESIntegTestCase {
  * public void testMethod() {}
  * }
  * </pre>
@@ -206,7 +206,7 @@ import static org.hamcrest.Matchers.startsWith;
  * determined at random and can change across tests. The {@link ClusterScope} allows configuring the initial number of nodes
  * that are created before the tests start.
  *  <pre>
- * {@literal @}ClusterScope(scope=Scope.SUITE, numDataNodes=3)
+ * {@literal @}NodeScope(scope=Scope.SUITE, numDataNodes=3)
  * public class SomeIT extends ESIntegTestCase {
  * public void testMethod() {}
  * }
@@ -267,7 +267,8 @@ public abstract class ESIntegTestCase extends ESTestCase {
      * The value of this seed can be used to initialize a random context for a specific index.
      * It's set once per test via a generic index template.
      */
-    public static final String SETTING_INDEX_SEED = "index.tests.seed";
+    public static final Setting<Long> INDEX_TEST_SEED_SETTING =
+        Setting.longSetting("index.tests.seed", 0, Long.MIN_VALUE, Property.IndexScope);
 
     /**
      * A boolean value to enable or disable mock modules. This is useful to test the
@@ -340,7 +341,7 @@ public abstract class ESIntegTestCase extends ESTestCase {
             default:
                 fail("Unknown Scope: [" + currentClusterScope + "]");
         }
-        cluster().beforeTest(getRandom(), getPerTestTransportClientRatio());
+        cluster().beforeTest(random(), getPerTestTransportClientRatio());
         cluster().wipe(excludeTemplates());
         randomIndexTemplate();
     }
@@ -353,10 +354,6 @@ public abstract class ESIntegTestCase extends ESTestCase {
         }
     }
 
-    private Loading randomLoadingValues() {
-        return randomFrom(Loading.values());
-    }
-
     /**
      * Creates a randomized index template. This template is used to pass in randomized settings on a
      * per index basis. Allows to enable/disable the randomization for number of shards and replicas
@@ -366,8 +363,11 @@ public abstract class ESIntegTestCase extends ESTestCase {
         // TODO move settings for random directory etc here into the index based randomized settings.
         if (cluster().size() > 0) {
             Settings.Builder randomSettingsBuilder =
-                    setRandomIndexSettings(getRandom(), Settings.builder())
-                            .put(SETTING_INDEX_SEED, getRandom().nextLong());
+                    setRandomIndexSettings(random(), Settings.builder());
+            if (isInternalCluster()) {
+                // this is only used by mock plugins and if the cluster is not internal we just can't set it
+                randomSettingsBuilder.put(INDEX_TEST_SEED_SETTING.getKey(), random().nextLong());
+            }
 
             randomSettingsBuilder.put(SETTING_NUMBER_OF_SHARDS, numberOfShards())
                     .put(SETTING_NUMBER_OF_REPLICAS, numberOfReplicas());
@@ -380,6 +380,7 @@ public abstract class ESIntegTestCase extends ESTestCase {
             } else {
                 randomSettingsBuilder.put("index.codec", CodecService.LUCENE_DEFAULT_CODEC);
             }
+
             XContentBuilder mappings = null;
             if (frequently() && randomDynamicTemplates()) {
                 mappings = XContentFactory.jsonBuilder().startObject().startObject("_default_");
@@ -388,65 +389,21 @@ public abstract class ESIntegTestCase extends ESTestCase {
                             .field("enabled", randomBoolean());
                     mappings.endObject();
                 }
-                mappings.startArray("dynamic_templates")
-                        .startObject()
-                        .startObject("template-strings")
-                        .field("match_mapping_type", "string")
-                        .startObject("mapping")
-                        .startObject("fielddata")
-                        .field(Loading.KEY, randomLoadingValues())
-                        .endObject()
-                        .endObject()
-                        .endObject()
-                        .endObject()
-                        .startObject()
-                        .startObject("template-longs")
-                        .field("match_mapping_type", "long")
-                        .startObject("mapping")
-                        .startObject("fielddata")
-                        .field(Loading.KEY, randomFrom(Loading.LAZY, Loading.EAGER))
-                        .endObject()
-                        .endObject()
-                        .endObject()
-                        .endObject()
-                        .startObject()
-                        .startObject("template-doubles")
-                        .field("match_mapping_type", "double")
-                        .startObject("mapping")
-                        .startObject("fielddata")
-                        .field(Loading.KEY, randomFrom(Loading.LAZY, Loading.EAGER))
-                        .endObject()
-                        .endObject()
-                        .endObject()
-                        .endObject()
-                        .startObject()
-                        .startObject("template-geo_points")
-                        .field("match_mapping_type", "geo_point")
-                        .startObject("mapping")
-                        .startObject("fielddata")
-                        .field(Loading.KEY, randomFrom(Loading.LAZY, Loading.EAGER))
-                        .endObject()
-                        .endObject()
-                        .endObject()
-                        .endObject()
-                        .startObject()
-                        .startObject("template-booleans")
-                        .field("match_mapping_type", "boolean")
-                        .startObject("mapping")
-                        .startObject("fielddata")
-                        .field(Loading.KEY, randomFrom(Loading.LAZY, Loading.EAGER))
-                        .endObject()
-                        .endObject()
-                        .endObject()
-                        .endObject()
-                        .endArray();
                 mappings.endObject().endObject();
             }
 
             for (String setting : randomSettingsBuilder.internalMap().keySet()) {
                 assertThat("non index. prefix setting set on index template, its a node setting...", setting, startsWith("index."));
             }
+            // always default delayed allocation to 0 to make sure we have tests are not delayed
+            randomSettingsBuilder.put(UnassignedInfo.INDEX_DELAYED_NODE_LEFT_TIMEOUT_SETTING.getKey(), 0);
+            if (randomBoolean()) {
+                randomSettingsBuilder.put(IndexModule.INDEX_QUERY_CACHE_ENABLED_SETTING.getKey(), randomBoolean());
+            }
 
+            if (randomBoolean()) {
+                randomSettingsBuilder.put(IndexModule.INDEX_QUERY_CACHE_EVERYTHING_SETTING.getKey(), randomBoolean());
+            }
             PutIndexTemplateRequestBuilder putTemplate = client().admin().indices()
                     .preparePutTemplate("random_index_template")
                     .setTemplate("*")
@@ -463,23 +420,22 @@ public abstract class ESIntegTestCase extends ESTestCase {
     protected Settings.Builder setRandomIndexSettings(Random random, Settings.Builder builder) {
         setRandomIndexMergeSettings(random, builder);
         setRandomIndexTranslogSettings(random, builder);
-        setRandomIndexNormsLoading(random, builder);
 
         if (random.nextBoolean()) {
-            builder.put(MergeSchedulerConfig.AUTO_THROTTLE, false);
+            builder.put(MergeSchedulerConfig.AUTO_THROTTLE_SETTING.getKey(), false);
         }
 
         if (random.nextBoolean()) {
-            builder.put(IndicesRequestCache.INDEX_CACHE_REQUEST_ENABLED, random.nextBoolean());
+            builder.put(IndicesRequestCache.INDEX_CACHE_REQUEST_ENABLED_SETTING.getKey(), random.nextBoolean());
         }
 
         if (random.nextBoolean()) {
-            builder.put("index.shard.check_on_startup", randomFrom(random, "false", "checksum", "true"));
+            builder.put(IndexSettings.INDEX_CHECK_ON_STARTUP.getKey(), randomFrom("false", "checksum", "true"));
         }
 
         if (randomBoolean()) {
             // keep this low so we don't stall tests
-            builder.put(UnassignedInfo.INDEX_DELAYED_NODE_LEFT_TIMEOUT_SETTING, RandomInts.randomIntBetween(random, 1, 15) + "ms");
+            builder.put(UnassignedInfo.INDEX_DELAYED_NODE_LEFT_TIMEOUT_SETTING.getKey(), RandomInts.randomIntBetween(random, 1, 15) + "ms");
         }
 
         return builder;
@@ -487,45 +443,34 @@ public abstract class ESIntegTestCase extends ESTestCase {
 
     private static Settings.Builder setRandomIndexMergeSettings(Random random, Settings.Builder builder) {
         if (random.nextBoolean()) {
-            builder.put(MergePolicyConfig.INDEX_COMPOUND_FORMAT,
+            builder.put(MergePolicyConfig.INDEX_COMPOUND_FORMAT_SETTING.getKey(),
                     random.nextBoolean() ? random.nextDouble() : random.nextBoolean());
         }
         switch (random.nextInt(4)) {
             case 3:
                 final int maxThreadCount = RandomInts.randomIntBetween(random, 1, 4);
                 final int maxMergeCount = RandomInts.randomIntBetween(random, maxThreadCount, maxThreadCount + 4);
-                builder.put(MergeSchedulerConfig.MAX_MERGE_COUNT, maxMergeCount);
-                builder.put(MergeSchedulerConfig.MAX_THREAD_COUNT, maxThreadCount);
+                builder.put(MergeSchedulerConfig.MAX_MERGE_COUNT_SETTING.getKey(), maxMergeCount);
+                builder.put(MergeSchedulerConfig.MAX_THREAD_COUNT_SETTING.getKey(), maxThreadCount);
                 break;
         }
 
         return builder;
     }
 
-    private static Settings.Builder setRandomIndexNormsLoading(Random random, Settings.Builder builder) {
-        if (random.nextBoolean()) {
-            builder.put(SearchService.NORMS_LOADING_KEY, RandomPicks.randomFrom(random, Arrays.asList(MappedFieldType.Loading.EAGER, MappedFieldType.Loading.LAZY)));
-        }
-        return builder;
-    }
-
     private static Settings.Builder setRandomIndexTranslogSettings(Random random, Settings.Builder builder) {
         if (random.nextBoolean()) {
-            builder.put(IndexShard.INDEX_TRANSLOG_FLUSH_THRESHOLD_SIZE, new ByteSizeValue(RandomInts.randomIntBetween(random, 1, 300), ByteSizeUnit.MB));
+            builder.put(IndexSettings.INDEX_TRANSLOG_FLUSH_THRESHOLD_SIZE_SETTING.getKey(), new ByteSizeValue(RandomInts.randomIntBetween(random, 1, 300), ByteSizeUnit.MB));
         }
         if (random.nextBoolean()) {
-            builder.put(IndexShard.INDEX_TRANSLOG_FLUSH_THRESHOLD_SIZE, new ByteSizeValue(1, ByteSizeUnit.PB)); // just don't flush
+            builder.put(IndexSettings.INDEX_TRANSLOG_FLUSH_THRESHOLD_SIZE_SETTING.getKey(), new ByteSizeValue(1, ByteSizeUnit.PB)); // just don't flush
         }
         if (random.nextBoolean()) {
-            builder.put(IndexSettings.INDEX_TRANSLOG_DURABILITY, RandomPicks.randomFrom(random, Translog.Durability.values()));
+            builder.put(IndexSettings.INDEX_TRANSLOG_DURABILITY_SETTING.getKey(), RandomPicks.randomFrom(random, Translog.Durability.values()));
         }
 
         if (random.nextBoolean()) {
-            if (rarely(random)) {
-                builder.put(IndexSettings.INDEX_TRANSLOG_SYNC_INTERVAL, 0); // 0 has special meaning to sync each op
-            } else {
-                builder.put(IndexSettings.INDEX_TRANSLOG_SYNC_INTERVAL, RandomInts.randomIntBetween(random, 100, 5000), TimeUnit.MILLISECONDS);
-            }
+            builder.put(IndexSettings.INDEX_TRANSLOG_SYNC_INTERVAL_SETTING.getKey(), RandomInts.randomIntBetween(random, 100, 5000), TimeUnit.MILLISECONDS);
         }
 
         return builder;
@@ -660,7 +605,7 @@ public abstract class ESIntegTestCase extends ESTestCase {
         }
         Client client = cluster().client();
         if (frequently()) {
-            client = new RandomizingClient(client, getRandom());
+            client = new RandomizingClient(client, random());
         }
         return client;
     }
@@ -668,13 +613,13 @@ public abstract class ESIntegTestCase extends ESTestCase {
     public static Client dataNodeClient() {
         Client client = internalCluster().dataNodeClient();
         if (frequently()) {
-            client = new RandomizingClient(client, getRandom());
+            client = new RandomizingClient(client, random());
         }
         return client;
     }
 
     public static Iterable<Client> clients() {
-        return cluster();
+        return cluster().getClients();
     }
 
     protected int minimumNumberOfShards() {
@@ -736,6 +681,8 @@ public abstract class ESIntegTestCase extends ESTestCase {
             logger.info("using custom data_path for index: [{}]", dataPath);
             builder.put(IndexMetaData.SETTING_DATA_PATH, dataPath);
         }
+        // always default delayed allocation to 0 to make sure we have tests are not delayed
+        builder.put(UnassignedInfo.INDEX_DELAYED_NODE_LEFT_TIMEOUT_SETTING.getKey(), 0);
         return builder.build();
     }
 
@@ -836,7 +783,7 @@ public abstract class ESIntegTestCase extends ESTestCase {
         assertThat(nodes, Matchers.not(Matchers.emptyIterable()));
         for (String node : nodes) {
             IndicesService indicesService = internalCluster().getInstance(IndicesService.class, node);
-            IndexService indexService = indicesService.indexService(index);
+            IndexService indexService = indicesService.indexService(resolveIndex(index));
             assertThat("index service doesn't exists on " + node, indexService, notNullValue());
             DocumentMapper documentMapper = indexService.mapperService().documentMapper(type);
             assertThat("document mapper doesn't exists on " + node, documentMapper, notNullValue());
@@ -881,7 +828,7 @@ public abstract class ESIntegTestCase extends ESTestCase {
                 sb.append("\n-> _index: [").append(hit.getIndex()).append("] type [").append(hit.getType())
                         .append("] id [").append(hit.id()).append("]");
             }
-            logger.warn(sb.toString());
+            logger.warn("{}", sb);
             fail(failMsg);
         }
     }
@@ -1038,7 +985,7 @@ public abstract class ESIntegTestCase extends ESTestCase {
      */
     public void setMinimumMasterNodes(int n) {
         assertTrue(client().admin().cluster().prepareUpdateSettings().setTransientSettings(
-                settingsBuilder().put(ElectMasterService.DISCOVERY_ZEN_MINIMUM_MASTER_NODES_SETTING.getKey(), n))
+                Settings.builder().put(ElectMasterService.DISCOVERY_ZEN_MINIMUM_MASTER_NODES_SETTING.getKey(), n))
                 .get().isAcknowledged());
     }
 
@@ -1079,7 +1026,7 @@ public abstract class ESIntegTestCase extends ESTestCase {
         logger.info("memory: {}", XContentHelper.toString(client().admin().cluster().prepareNodesStats().clear().setJvm(true).get()));
     }
 
-    void ensureClusterSizeConsistency() {
+    protected void ensureClusterSizeConsistency() {
         if (cluster() != null) { // if static init fails the cluster can be null
             logger.trace("Check consistency for [{}] nodes", cluster().size());
             assertNoTimeout(client().admin().cluster().prepareHealth().setWaitForNodes(Integer.toString(cluster().size())).get());
@@ -1096,18 +1043,18 @@ public abstract class ESIntegTestCase extends ESTestCase {
             // remove local node reference
             masterClusterState = ClusterState.Builder.fromBytes(masterClusterStateBytes, null);
             Map<String, Object> masterStateMap = convertToMap(masterClusterState);
-            int masterClusterStateSize = masterClusterState.toString().length();
-            String masterId = masterClusterState.nodes().masterNodeId();
-            for (Client client : cluster()) {
+            int masterClusterStateSize = ClusterState.Builder.toBytes(masterClusterState).length;
+            String masterId = masterClusterState.nodes().getMasterNodeId();
+            for (Client client : cluster().getClients()) {
                 ClusterState localClusterState = client.admin().cluster().prepareState().all().setLocal(true).get().getState();
                 byte[] localClusterStateBytes = ClusterState.Builder.toBytes(localClusterState);
                 // remove local node reference
                 localClusterState = ClusterState.Builder.fromBytes(localClusterStateBytes, null);
                 final Map<String, Object> localStateMap = convertToMap(localClusterState);
-                final int localClusterStateSize = localClusterState.toString().length();
+                final int localClusterStateSize = ClusterState.Builder.toBytes(localClusterState).length;
                 // Check that the non-master node has the same version of the cluster state as the master and
                 // that the master node matches the master (otherwise there is no requirement for the cluster state to match)
-                if (masterClusterState.version() == localClusterState.version() && masterId.equals(localClusterState.nodes().masterNodeId())) {
+                if (masterClusterState.version() == localClusterState.version() && masterId.equals(localClusterState.nodes().getMasterNodeId())) {
                     try {
                         assertEquals("clusterstate UUID does not match", masterClusterState.stateUUID(), localClusterState.stateUUID());
                         // We cannot compare serialization bytes since serialization order of maps is not guaranteed
@@ -1233,10 +1180,10 @@ public abstract class ESIntegTestCase extends ESTestCase {
      *
      * @see #waitForRelocation()
      */
-    protected final RefreshResponse refresh() {
+    protected final RefreshResponse refresh(String... indices) {
         waitForRelocation();
         // TODO RANDOMIZE with flush?
-        RefreshResponse actionGet = client().admin().indices().prepareRefresh().execute().actionGet();
+        RefreshResponse actionGet = client().admin().indices().prepareRefresh(indices).execute().actionGet();
         assertNoFailures(actionGet);
         return actionGet;
     }
@@ -1246,7 +1193,7 @@ public abstract class ESIntegTestCase extends ESTestCase {
      */
     protected final void flushAndRefresh(String... indices) {
         flush(indices);
-        refresh();
+        refresh(indices);
     }
 
     /**
@@ -1284,7 +1231,7 @@ public abstract class ESIntegTestCase extends ESTestCase {
      */
     protected final void enableAllocation(String... indices) {
         client().admin().indices().prepareUpdateSettings(indices).setSettings(Settings.builder().put(
-                EnableAllocationDecider.INDEX_ROUTING_ALLOCATION_ENABLE, "all"
+                EnableAllocationDecider.INDEX_ROUTING_ALLOCATION_ENABLE_SETTING.getKey(), "all"
         )).get();
     }
 
@@ -1293,7 +1240,7 @@ public abstract class ESIntegTestCase extends ESTestCase {
      */
     protected final void disableAllocation(String... indices) {
         client().admin().indices().prepareUpdateSettings(indices).setSettings(Settings.builder().put(
-                EnableAllocationDecider.INDEX_ROUTING_ALLOCATION_ENABLE, "none"
+                EnableAllocationDecider.INDEX_ROUTING_ALLOCATION_ENABLE_SETTING.getKey(), "none"
         )).get();
     }
 
@@ -1367,7 +1314,7 @@ public abstract class ESIntegTestCase extends ESTestCase {
      */
     public void indexRandom(boolean forceRefresh, boolean dummyDocuments, boolean maybeFlush, List<IndexRequestBuilder> builders) throws InterruptedException, ExecutionException {
 
-        Random random = getRandom();
+        Random random = random();
         Set<String> indicesSet = new HashSet<>();
         for (IndexRequestBuilder builder : builders) {
             indicesSet.add(builder.request().index());
@@ -1433,11 +1380,8 @@ public abstract class ESIntegTestCase extends ESTestCase {
         if (!bogusIds.isEmpty()) {
             // delete the bogus types again - it might trigger merges or at least holes in the segments and enforces deleted docs!
             for (Tuple<String, String> doc : bogusIds) {
-                // see https://github.com/elasticsearch/elasticsearch/issues/8706
-                final DeleteResponse deleteResponse = client().prepareDelete(doc.v1(), RANDOM_BOGUS_TYPE, doc.v2()).get();
-                if (deleteResponse.isFound() == false) {
-                    logger.warn("failed to delete a dummy doc [{}][{}]", doc.v1(), doc.v2());
-                }
+                assertTrue("failed to delete a dummy doc [" + doc.v1() + "][" + doc.v2() + "]",
+                    client().prepareDelete(doc.v1(), RANDOM_BOGUS_TYPE, doc.v2()).get().isFound());
             }
         }
         if (forceRefresh) {
@@ -1461,7 +1405,7 @@ public abstract class ESIntegTestCase extends ESTestCase {
 
     /** Sets or unsets the cluster read_only mode **/
     public static void setClusterReadOnly(boolean value) {
-        Settings settings = settingsBuilder().put(MetaData.SETTING_READ_ONLY_SETTING.getKey(), value).build();
+        Settings settings = Settings.builder().put(MetaData.SETTING_READ_ONLY_SETTING.getKey(), value).build();
         assertAcked(client().admin().cluster().prepareUpdateSettings().setTransientSettings(settings).get());
     }
 
@@ -1534,16 +1478,23 @@ public abstract class ESIntegTestCase extends ESTestCase {
         int numDataNodes() default -1;
 
         /**
-         * Returns the minimum number of nodes in the cluster. Default is <tt>-1</tt>.
+         * Returns the minimum number of data nodes in the cluster. Default is <tt>-1</tt>.
          * Ignored when {@link ClusterScope#numDataNodes()} is set.
          */
         int minNumDataNodes() default -1;
 
         /**
-         * Returns the maximum number of nodes in the cluster.  Default is <tt>-1</tt>.
+         * Returns the maximum number of data nodes in the cluster.  Default is <tt>-1</tt>.
          * Ignored when {@link ClusterScope#numDataNodes()} is set.
          */
         int maxNumDataNodes() default -1;
+
+        /**
+         * Indicates whether the cluster can have dedicated master nodes. If <tt>false</tt> means data nodes will serve as master nodes
+         * and there will be no dedicated master (and data) nodes. Default is <tt>true</tt> which means
+         * dedicated master nodes will be randomly used.
+         */
+        boolean supportsDedicatedMasters() default true;
 
         /**
          * Returns the number of client nodes in the cluster. Default is {@link InternalTestCluster#DEFAULT_NUM_CLIENT_NODES}, a
@@ -1627,7 +1578,6 @@ public abstract class ESIntegTestCase extends ESTestCase {
         return getAnnotation(clazz.getSuperclass(), annotationClass);
     }
 
-
     private Scope getCurrentClusterScope() {
         return getCurrentClusterScope(this.getClass());
     }
@@ -1636,6 +1586,11 @@ public abstract class ESIntegTestCase extends ESTestCase {
         ClusterScope annotation = getAnnotation(clazz, ClusterScope.class);
         // if we are not annotated assume suite!
         return annotation == null ? Scope.SUITE : annotation.scope();
+    }
+
+    private boolean getSupportsDedicatedMasters() {
+        ClusterScope annotation = getAnnotation(this.getClass(), ClusterScope.class);
+        return annotation == null ? true : annotation.supportsDedicatedMasters();
     }
 
     private int getNumDataNodes() {
@@ -1671,15 +1626,19 @@ public abstract class ESIntegTestCase extends ESTestCase {
      * In other words subclasses must ensure this method is idempotent.
      */
     protected Settings nodeSettings(int nodeOrdinal) {
-        Settings.Builder builder = settingsBuilder()
+        Settings.Builder builder = Settings.builder()
                 // Default the watermarks to absurdly low to prevent the tests
                 // from failing on nodes without enough disk space
                 .put(DiskThresholdDecider.CLUSTER_ROUTING_ALLOCATION_LOW_DISK_WATERMARK_SETTING.getKey(), "1b")
                 .put(DiskThresholdDecider.CLUSTER_ROUTING_ALLOCATION_HIGH_DISK_WATERMARK_SETTING.getKey(), "1b")
-                .put("script.indexed", "on")
-                .put("script.inline", "on")
-                        // wait short time for other active shards before actually deleting, default 30s not needed in tests
-                .put(IndicesStore.INDICES_STORE_DELETE_SHARD_TIMEOUT, new TimeValue(1, TimeUnit.SECONDS));
+                .put("script.stored", "true")
+                .put("script.inline", "true")
+                // by default we never cache below 10k docs in a segment,
+                // bypass this limit so that caching gets some testing in
+                // integration tests that usually create few documents
+                .put(IndicesQueryCache.INDICES_QUERIES_CACHE_ALL_SEGMENTS_SETTING.getKey(), nodeOrdinal % 2 == 0)
+                // wait short time for other active shards before actually deleting, default 30s not needed in tests
+                .put(IndicesStore.INDICES_STORE_DELETE_SHARD_TIMEOUT.getKey(), new TimeValue(1, TimeUnit.SECONDS));
         return builder.build();
     }
 
@@ -1699,7 +1658,7 @@ public abstract class ESIntegTestCase extends ESTestCase {
 
     /** Helper method to create list of plugins without specifying generic types. */
     @SafeVarargs
-    @SuppressWarnings("varargs") // due to type erasure, the varargs type is non-reifiable, which casues this warning
+    @SuppressWarnings("varargs") // due to type erasure, the varargs type is non-reifiable, which causes this warning
     protected final Collection<Class<? extends Plugin>> pluginList(Class<? extends Plugin>... plugins) {
         return Arrays.asList(plugins);
     }
@@ -1707,7 +1666,7 @@ public abstract class ESIntegTestCase extends ESTestCase {
     /**
      * This method is used to obtain additional settings for clients created by the internal cluster.
      * These settings will be applied on the client in addition to some randomized settings defined in
-     * the cluster. These setttings will also override any other settings the internal cluster might
+     * the cluster. These settings will also override any other settings the internal cluster might
      * add by default.
      */
     protected Settings transportClientSettings() {
@@ -1753,7 +1712,7 @@ public abstract class ESIntegTestCase extends ESTestCase {
         NodeConfigurationSource nodeConfigurationSource = new NodeConfigurationSource() {
             @Override
             public Settings nodeSettings(int nodeOrdinal) {
-                return Settings.builder().put(Node.HTTP_ENABLED, false).
+                return Settings.builder().put(NetworkModule.HTTP_ENABLED.getKey(), false).
                         put(ESIntegTestCase.this.nodeSettings(nodeOrdinal)).build();
             }
 
@@ -1773,6 +1732,7 @@ public abstract class ESIntegTestCase extends ESTestCase {
             }
         };
 
+        boolean supportsDedicatedMasters = getSupportsDedicatedMasters();
         int numDataNodes = getNumDataNodes();
         int minNumDataNodes;
         int maxNumDataNodes;
@@ -1795,19 +1755,53 @@ public abstract class ESIntegTestCase extends ESTestCase {
 
         Collection<Class<? extends Plugin>> mockPlugins = getMockPlugins();
 
-        return new InternalTestCluster(nodeMode, seed, createTempDir(), minNumDataNodes, maxNumDataNodes,
+        return new InternalTestCluster(nodeMode, seed, createTempDir(), supportsDedicatedMasters, minNumDataNodes, maxNumDataNodes,
                 InternalTestCluster.clusterName(scope.name(), seed) + "-cluster", nodeConfigurationSource, getNumClientNodes(),
-                InternalTestCluster.DEFAULT_ENABLE_HTTP_PIPELINING, nodePrefix, mockPlugins);
+                InternalTestCluster.DEFAULT_ENABLE_HTTP_PIPELINING, nodePrefix, mockPlugins, getClientWrapper());
     }
 
-    /** Return the mock plugins the cluster should use. These may be randomly omitted based on the cluster seed. */
+    /**
+     * Returns a function that allows to wrap / filter all clients that are exposed by the test cluster. This is useful
+     * for debugging or request / response pre and post processing. It also allows to intercept all calls done by the test
+     * framework. By default this method returns an identity function {@link Function#identity()}.
+     */
+    protected Function<Client,Client> getClientWrapper() {
+        return Function.identity();
+    }
+
+    /** Return the mock plugins the cluster should use */
     protected Collection<Class<? extends Plugin>> getMockPlugins() {
-        return pluginList(MockTransportService.TestPlugin.class,
-                          MockFSIndexStore.TestPlugin.class,
-                          NodeMocksPlugin.class,
-                          MockEngineFactoryPlugin.class,
-                          MockSearchService.TestPlugin.class,
-                          AssertingLocalTransport.TestPlugin.class);
+        final ArrayList<Class<? extends Plugin>> mocks = new ArrayList<>();
+        if (randomBoolean()) { // sometimes run without those completely
+            if (randomBoolean()) {
+                mocks.add(MockTransportService.TestPlugin.class);
+            }
+            if (randomBoolean()) {
+                mocks.add(MockFSIndexStore.TestPlugin.class);
+            }
+            if (randomBoolean()) {
+                mocks.add(NodeMocksPlugin.class);
+            }
+            if (randomBoolean()) {
+                mocks.add(MockEngineFactoryPlugin.class);
+            }
+            if (randomBoolean()) {
+                mocks.add(MockSearchService.TestPlugin.class);
+            }
+            if (randomBoolean()) {
+                mocks.add(AssertingLocalTransport.TestPlugin.class);
+            }
+        }
+        mocks.add(TestSeedPlugin.class);
+        return Collections.unmodifiableList(mocks);
+    }
+
+    public static final class TestSeedPlugin extends Plugin {
+        @Override
+        public List<Setting<?>> getSettings() {
+            return Arrays.asList(INDEX_TEST_SEED_SETTING);
+        }
+
     }
 
     /**
@@ -1837,23 +1831,6 @@ public abstract class ESIntegTestCase extends ESTestCase {
         }
         assert perTestRatio >= 0.0 && perTestRatio <= 1.0;
         return perTestRatio;
-    }
-
-    /**
-     * Returns a random JODA Time Zone based on Java Time Zones
-     */
-    public static DateTimeZone randomDateTimeZone() {
-        DateTimeZone timeZone;
-
-        // It sounds like some Java Time Zones are unknown by JODA. For example: Asia/Riyadh88
-        // We need to fallback in that case to a known time zone
-        try {
-            timeZone = DateTimeZone.forTimeZone(RandomizedTest.randomTimeZone());
-        } catch (IllegalArgumentException e) {
-            timeZone = DateTimeZone.forOffsetHours(randomIntBetween(-12, 12));
-        }
-
-        return timeZone;
     }
 
     /**
@@ -1899,8 +1876,8 @@ public abstract class ESIntegTestCase extends ESTestCase {
         for (IndexRoutingTable indexRoutingTable : clusterState.routingTable()) {
             for (IndexShardRoutingTable indexShardRoutingTable : indexRoutingTable) {
                 for (ShardRouting shardRouting : indexShardRoutingTable) {
-                    if (shardRouting.currentNodeId() != null && index.equals(shardRouting.getIndex())) {
-                        String name = clusterState.nodes().get(shardRouting.currentNodeId()).name();
+                    if (shardRouting.currentNodeId() != null && index.equals(shardRouting.getIndexName())) {
+                        String name = clusterState.nodes().get(shardRouting.currentNodeId()).getName();
                         nodes.add(name);
                         assertThat("Allocated on new node: " + name, Regex.simpleMatch(pattern, name), is(true));
                     }
@@ -1943,7 +1920,7 @@ public abstract class ESIntegTestCase extends ESTestCase {
     @After
     public final void after() throws Exception {
         printTestMessage("finished");
-        // Deleting indices is going to clear search contexts implicitely so we
+        // Deleting indices is going to clear search contexts implicitly so we
         // need to check that there are no more in-flight search contexts before
         // we remove indices
         super.ensureAllSearchContextsReleased();
@@ -1981,7 +1958,7 @@ public abstract class ESIntegTestCase extends ESTestCase {
         assert INSTANCE == null;
         if (isSuiteScopedTest(targetClass)) {
             // note we need to do this this way to make sure this is reproducible
-            INSTANCE = (ESIntegTestCase) targetClass.newInstance();
+            INSTANCE = (ESIntegTestCase) targetClass.getConstructor().newInstance();
             boolean success = false;
             try {
                 INSTANCE.printTestMessage("setup");
@@ -2002,8 +1979,8 @@ public abstract class ESIntegTestCase extends ESTestCase {
      * Compute a routing key that will route documents to the <code>shard</code>-th shard
      * of the provided index.
      */
-    protected String routingKeyForShard(String index, String type, int shard) {
-        return internalCluster().routingKeyForShard(index, type, shard, getRandom());
+    protected String routingKeyForShard(String index, int shard) {
+        return internalCluster().routingKeyForShard(resolveIndex(index), shard, random());
     }
 
     /**
@@ -2044,24 +2021,29 @@ public abstract class ESIntegTestCase extends ESTestCase {
         assertTrue(Files.exists(dest));
         Settings.Builder builder = Settings.builder()
                 .put(settings)
-                .put("path.data", dataDir.toAbsolutePath());
+                .put(Environment.PATH_DATA_SETTING.getKey(), dataDir.toAbsolutePath());
 
         Path configDir = indexDir.resolve("config");
         if (Files.exists(configDir)) {
-            builder.put("path.conf", configDir.toAbsolutePath());
+            builder.put(Environment.PATH_CONF_SETTING.getKey(), configDir.toAbsolutePath());
         }
         return builder.build();
     }
 
     protected HttpRequestBuilder httpClient() {
+        return httpClient(HttpClients.createDefault());
+    }
+
+    protected HttpRequestBuilder httpClient(CloseableHttpClient httpClient) {
         final NodesInfoResponse nodeInfos = client().admin().cluster().prepareNodesInfo().get();
-        final NodeInfo[] nodes = nodeInfos.getNodes();
-        assertTrue(nodes.length > 0);
+        final List<NodeInfo> nodes = nodeInfos.getNodes();
+        assertFalse(nodeInfos.hasFailures());
         TransportAddress publishAddress = randomFrom(nodes).getHttp().address().publishAddress();
         assertEquals(1, publishAddress.uniqueAddressTypeId());
         InetSocketAddress address = ((InetSocketTransportAddress) publishAddress).address();
-        return new HttpRequestBuilder(HttpClients.createDefault()).host(NetworkAddress.formatAddress(address.getAddress())).port(address.getPort());
+        return new HttpRequestBuilder(httpClient).host(NetworkAddress.format(address.getAddress())).port(address.getPort());
     }
+
 
     /**
      * This method is executed iff the test is annotated with {@link SuiteScopeTestCase}
@@ -2104,6 +2086,13 @@ public abstract class ESIntegTestCase extends ESTestCase {
     @Inherited
     @Target(ElementType.TYPE)
     public @interface SuppressNetworkMode {
+    }
+
+    public static Index resolveIndex(String index) {
+        GetIndexResponse getIndexResponse = client().admin().indices().prepareGetIndex().setIndices(index).get();
+        assertTrue("index " + index + " not found", getIndexResponse.getSettings().containsKey(index));
+        String uuid = getIndexResponse.getSettings().get(index).get(IndexMetaData.SETTING_INDEX_UUID);
+        return new Index(index, uuid);
     }
 
 }

@@ -30,6 +30,7 @@ import org.elasticsearch.index.mapper.MapperService;
 import org.elasticsearch.index.mapper.Mapping;
 import org.elasticsearch.index.mapper.Uid;
 import org.elasticsearch.index.translog.Translog;
+import org.elasticsearch.rest.RestStatus;
 
 import java.io.IOException;
 import java.util.HashMap;
@@ -67,13 +68,33 @@ public class TranslogRecoveryPerformer {
         int numOps = 0;
         try {
             for (Translog.Operation operation : operations) {
-                performRecoveryOperation(engine, operation, false);
+                performRecoveryOperation(engine, operation, false, Engine.Operation.Origin.PEER_RECOVERY);
                 numOps++;
             }
+            engine.getTranslog().sync();
         } catch (Throwable t) {
             throw new BatchOperationException(shardId, "failed to apply batch translog operation", numOps, t);
         }
         return numOps;
+    }
+
+    public int recoveryFromSnapshot(Engine engine, Translog.Snapshot snapshot) throws IOException {
+        Translog.Operation operation;
+        int opsRecovered = 0;
+        while ((operation = snapshot.next()) != null) {
+            try {
+                performRecoveryOperation(engine, operation, true, Engine.Operation.Origin.LOCAL_TRANSLOG_RECOVERY);
+                opsRecovered++;
+            } catch (ElasticsearchException e) {
+                if (e.status() == RestStatus.BAD_REQUEST) {
+                    // mainly for MapperParsingException and Failure to detect xcontent
+                    logger.info("ignoring recovery of a corrupt translog entry", e);
+                } else {
+                    throw e;
+                }
+            }
+        }
+        return opsRecovered;
     }
 
     public static class BatchOperationException extends ElasticsearchException {
@@ -125,19 +146,19 @@ public class TranslogRecoveryPerformer {
      *                            cause a {@link MapperException} to be thrown if an update
      *                            is encountered.
      */
-    public void performRecoveryOperation(Engine engine, Translog.Operation operation, boolean allowMappingUpdates) {
+    private void performRecoveryOperation(Engine engine, Translog.Operation operation, boolean allowMappingUpdates, Engine.Operation.Origin origin) {
         try {
             switch (operation.opType()) {
                 case INDEX:
                     Translog.Index index = (Translog.Index) operation;
-                    Engine.Index engineIndex = IndexShard.prepareIndex(docMapper(index.type()), source(index.source()).type(index.type()).id(index.id())
-                                    .routing(index.routing()).parent(index.parent()).timestamp(index.timestamp()).ttl(index.ttl()),
-                            index.version(), index.versionType().versionTypeForReplicationAndRecovery(), Engine.Operation.Origin.RECOVERY);
+                    Engine.Index engineIndex = IndexShard.prepareIndex(docMapper(index.type()), source(shardId.getIndexName(), index.type(), index.id(), index.source())
+                            .routing(index.routing()).parent(index.parent()).timestamp(index.timestamp()).ttl(index.ttl()),
+                        index.version(), index.versionType().versionTypeForReplicationAndRecovery(), origin);
                     maybeAddMappingUpdate(engineIndex.type(), engineIndex.parsedDoc().dynamicMappingsUpdate(), engineIndex.id(), allowMappingUpdates);
                     if (logger.isTraceEnabled()) {
                         logger.trace("[translog] recover [index] op of [{}][{}]", index.type(), index.id());
                     }
-                    engine.index(engineIndex);
+                    index(engine, engineIndex);
                     break;
                 case DELETE:
                     Translog.Delete delete = (Translog.Delete) operation;
@@ -145,8 +166,9 @@ public class TranslogRecoveryPerformer {
                     if (logger.isTraceEnabled()) {
                         logger.trace("[translog] recover [delete] op of [{}][{}]", uid.type(), uid.id());
                     }
-                    engine.delete(new Engine.Delete(uid.type(), uid.id(), delete.uid(), delete.version(),
-                            delete.versionType().versionTypeForReplicationAndRecovery(), Engine.Operation.Origin.RECOVERY, System.nanoTime(), false));
+                    final Engine.Delete engineDelete = new Engine.Delete(uid.type(), uid.id(), delete.uid(), delete.version(),
+                        delete.versionType().versionTypeForReplicationAndRecovery(), origin, System.nanoTime(), false);
+                    delete(engine, engineDelete);
                     break;
                 default:
                     throw new IllegalStateException("No operation defined for [" + operation + "]");
@@ -172,6 +194,14 @@ public class TranslogRecoveryPerformer {
         operationProcessed();
     }
 
+    protected void index(Engine engine, Engine.Index engineIndex) {
+        engine.index(engineIndex);
+    }
+
+    protected void delete(Engine engine, Engine.Delete engineDelete) {
+        engine.delete(engineDelete);
+    }
+
 
     /**
      * Called once for every processed operation by this recovery performer.
@@ -180,6 +210,7 @@ public class TranslogRecoveryPerformer {
     protected void operationProcessed() {
         // noop
     }
+
 
     /**
      * Returns the recovered types modifying the mapping during the recovery

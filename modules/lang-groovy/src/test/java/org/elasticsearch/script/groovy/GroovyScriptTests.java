@@ -28,6 +28,7 @@ import org.elasticsearch.plugins.Plugin;
 import org.elasticsearch.script.Script;
 import org.elasticsearch.script.ScriptService.ScriptType;
 import org.elasticsearch.search.builder.SearchSourceBuilder;
+import org.elasticsearch.search.sort.ScriptSortBuilder.ScriptSortType;
 import org.elasticsearch.search.sort.SortBuilders;
 import org.elasticsearch.test.ESIntegTestCase;
 
@@ -36,6 +37,7 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
 
+import static org.elasticsearch.action.support.WriteRequest.RefreshPolicy.IMMEDIATE;
 import static org.elasticsearch.index.query.QueryBuilders.constantScoreQuery;
 import static org.elasticsearch.index.query.QueryBuilders.functionScoreQuery;
 import static org.elasticsearch.index.query.QueryBuilders.matchQuery;
@@ -57,7 +59,7 @@ public class GroovyScriptTests extends ESIntegTestCase {
     }
 
     public void testGroovyBigDecimalTransformation() {
-        client().prepareIndex("test", "doc", "1").setSource("foo", 5).setRefresh(true).get();
+        client().prepareIndex("test", "doc", "1").setSource("foo", 5).setRefreshPolicy(IMMEDIATE).get();
 
         // Test that something that would usually be a BigDecimal is transformed into a Double
         assertScript("def n = 1.23; assert n instanceof Double; return n;");
@@ -68,7 +70,8 @@ public class GroovyScriptTests extends ESIntegTestCase {
     public void assertScript(String scriptString) {
         Script script = new Script(scriptString, ScriptType.INLINE, "groovy", null);
         SearchResponse resp = client().prepareSearch("test")
-                .setSource(new SearchSourceBuilder().query(QueryBuilders.matchAllQuery()).sort(SortBuilders.scriptSort(script, "number")))
+                .setSource(new SearchSourceBuilder().query(QueryBuilders.matchAllQuery()).sort(SortBuilders.
+                        scriptSort(script, ScriptSortType.NUMBER)))
                 .get();
         assertNoFailures(resp);
     }

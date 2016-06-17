@@ -20,12 +20,24 @@
 package org.elasticsearch.common.geo.builders;
 
 import com.vividsolutions.jts.geom.Coordinate;
+
 import org.elasticsearch.test.geo.RandomShapeGenerator;
 import org.elasticsearch.test.geo.RandomShapeGenerator.ShapeType;
 
 import java.io.IOException;
+import java.util.List;
 
 public class MultiPointBuilderTests extends AbstractShapeBuilderTestCase<MultiPointBuilder> {
+
+    public void testInvalidBuilderException() {
+        IllegalArgumentException e = expectThrows(IllegalArgumentException.class, () -> new MultiPointBuilder((List<Coordinate>) null));
+        assertEquals("cannot create point collection with empty set of points", e.getMessage());
+        e = expectThrows(IllegalArgumentException.class, () -> new MultiPointBuilder(new CoordinatesBuilder().build()));
+        assertEquals("cannot create point collection with empty set of points", e.getMessage());
+
+        // one point is minimum
+        new MultiPointBuilder(new CoordinatesBuilder().coordinate(0.0, 0.0).build());
+    }
 
     @Override
     protected MultiPointBuilder createTestShapeBuilder() {
@@ -40,24 +52,28 @@ public class MultiPointBuilderTests extends AbstractShapeBuilderTestCase<MultiPo
     static MultiPointBuilder mutate(MultiPointBuilder original) throws IOException {
         MultiPointBuilder mutation = (MultiPointBuilder) copyShape(original);
         Coordinate[] coordinates = original.coordinates(false);
-        Coordinate coordinate = randomFrom(coordinates);
-        if (randomBoolean()) {
-            if (coordinate.x != 0.0) {
-                coordinate.x = coordinate.x / 2;
+        if (coordinates.length > 0) {
+            Coordinate coordinate = randomFrom(coordinates);
+            if (randomBoolean()) {
+                if (coordinate.x != 0.0) {
+                    coordinate.x = coordinate.x / 2;
+                } else {
+                    coordinate.x = randomDoubleBetween(-180.0, 180.0, true);
+                }
             } else {
-                coordinate.x = randomDoubleBetween(-180.0, 180.0, true);
+                if (coordinate.y != 0.0) {
+                    coordinate.y = coordinate.y / 2;
+                } else {
+                    coordinate.y = randomDoubleBetween(-90.0, 90.0, true);
+                }
             }
         } else {
-            if (coordinate.y != 0.0) {
-                coordinate.y = coordinate.y / 2;
-            } else {
-                coordinate.y = randomDoubleBetween(-90.0, 90.0, true);
-            }
+            coordinates = new Coordinate[]{new Coordinate(1.0, 1.0)};
         }
-        return mutation.points(coordinates);
+        return mutation.coordinates(coordinates);
     }
 
     static MultiPointBuilder createRandomShape() {
-        return (MultiPointBuilder) RandomShapeGenerator.createShape(getRandom(), ShapeType.MULTIPOINT);
+        return (MultiPointBuilder) RandomShapeGenerator.createShape(random(), ShapeType.MULTIPOINT);
     }
 }

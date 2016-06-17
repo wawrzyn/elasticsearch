@@ -20,6 +20,8 @@
 package org.elasticsearch.bootstrap;
 
 import com.carrotsearch.randomizedtesting.RandomizedRunner;
+import org.apache.log4j.Java9Hack;
+import org.apache.lucene.util.Constants;
 import org.apache.lucene.util.LuceneTestCase;
 import org.elasticsearch.SecureSM;
 import org.elasticsearch.common.Strings;
@@ -89,6 +91,10 @@ public class BootstrapForTesting {
             throw new RuntimeException("found jar hell in test classpath", e);
         }
 
+        if (Constants.JRE_IS_MINIMUM_JAVA9) {
+            Java9Hack.fixLog4j();
+        }
+
         // install security manager if requested
         if (systemPropertyAsBoolean("tests.security.manager", true)) {
             try {
@@ -122,7 +128,7 @@ public class BootstrapForTesting {
                 }
                 // intellij hack: intellij test runner wants setIO and will
                 // screw up all test logging without it!
-                if (System.getProperty("tests.maven") == null) {
+                if (System.getProperty("tests.gradle") == null) {
                     perms.add(new RuntimePermission("setIO"));
                 }
 
@@ -154,11 +160,9 @@ public class BootstrapForTesting {
                     try (InputStream stream = url.openStream()) {
                         properties.load(stream);
                     }
-                    if (Boolean.parseBoolean(properties.getProperty("jvm"))) {
-                        String clazz = properties.getProperty("classname");
-                        if (clazz != null) {
-                            Class.forName(clazz);
-                        }
+                    String clazz = properties.getProperty("classname");
+                    if (clazz != null) {
+                        Class.forName(clazz);
                     }
                 }
             } catch (Exception e) {
@@ -168,7 +172,7 @@ public class BootstrapForTesting {
     }
 
     /**
-     * we dont know which codesources belong to which plugin, so just remove the permission from key codebases
+     * we don't know which codesources belong to which plugin, so just remove the permission from key codebases
      * like core, test-framework, etc. this way tests fail if accesscontroller blocks are missing.
      */
     @SuppressForbidden(reason = "accesses fully qualified URLs to configure security")

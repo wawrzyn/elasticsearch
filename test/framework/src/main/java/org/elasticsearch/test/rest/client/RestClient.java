@@ -24,19 +24,18 @@ import org.apache.http.config.RegistryBuilder;
 import org.apache.http.conn.socket.ConnectionSocketFactory;
 import org.apache.http.conn.socket.PlainConnectionSocketFactory;
 import org.apache.http.conn.ssl.SSLConnectionSocketFactory;
-import org.apache.http.conn.ssl.SSLContexts;
 import org.apache.http.impl.client.CloseableHttpClient;
 import org.apache.http.impl.client.HttpClients;
 import org.apache.http.impl.conn.PoolingHttpClientConnectionManager;
+import org.apache.http.ssl.SSLContexts;
 import org.apache.lucene.util.IOUtils;
 import org.elasticsearch.Version;
-import org.elasticsearch.client.support.Headers;
 import org.elasticsearch.common.Strings;
 import org.elasticsearch.common.io.PathUtils;
 import org.elasticsearch.common.logging.ESLogger;
 import org.elasticsearch.common.logging.Loggers;
-import org.elasticsearch.common.network.NetworkAddress;
 import org.elasticsearch.common.settings.Settings;
+import org.elasticsearch.common.util.concurrent.ThreadContext;
 import org.elasticsearch.common.util.set.Sets;
 import org.elasticsearch.test.rest.client.http.HttpRequestBuilder;
 import org.elasticsearch.test.rest.client.http.HttpResponse;
@@ -47,7 +46,7 @@ import javax.net.ssl.SSLContext;
 import java.io.Closeable;
 import java.io.IOException;
 import java.io.InputStream;
-import java.net.InetSocketAddress;
+import java.net.URL;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.KeyManagementException;
@@ -61,6 +60,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
+
+import static java.util.Objects.requireNonNull;
 
 /**
  * REST client used to test the elasticsearch REST layer
@@ -79,19 +80,19 @@ public class RestClient implements Closeable {
     private final String protocol;
     private final RestSpec restSpec;
     private final CloseableHttpClient httpClient;
-    private final Headers headers;
-    private final InetSocketAddress[] addresses;
+    private final URL[] urls;
     private final Version esVersion;
+    private final ThreadContext threadContext;
 
-    public RestClient(RestSpec restSpec, Settings settings, InetSocketAddress[] addresses) throws IOException, RestException {
-        assert addresses.length > 0;
+    public RestClient(RestSpec restSpec, Settings settings, URL[] urls) throws IOException, RestException {
+        assert urls.length > 0;
         this.restSpec = restSpec;
-        this.headers = new Headers(settings);
         this.protocol = settings.get(PROTOCOL, "http");
         this.httpClient = createHttpClient(settings);
-        this.addresses = addresses;
+        this.threadContext = new ThreadContext(settings);
+        this.urls = urls;
         this.esVersion = readAndCheckVersion();
-        logger.info("REST client initialized {}, elasticsearch version: [{}]", addresses, esVersion);
+        logger.info("REST client initialized {}, elasticsearch version: [{}]", urls, esVersion);
     }
 
     private Version readAndCheckVersion() throws IOException, RestException {
@@ -102,8 +103,8 @@ public class RestClient implements Closeable {
         assert restApi.getMethods().size() == 1;
 
         String version = null;
-        for (InetSocketAddress address : addresses) {
-            RestResponse restResponse = new RestResponse(httpRequestBuilder(address)
+        for (URL url : urls) {
+            RestResponse restResponse = new RestResponse(httpRequestBuilder(url)
                     .path(restApi.getPaths().get(0))
                     .method(restApi.getMethods().get(0)).execute());
             checkStatusCode(restResponse);
@@ -132,7 +133,8 @@ public class RestClient implements Closeable {
      * @throws RestException if the obtained status code is non ok, unless the specific error code needs to be ignored
      * according to the ignore parameter received as input (which won't get sent to elasticsearch)
      */
-    public RestResponse callApi(String apiName, Map<String, String> params, String body, Map<String, String> headers) throws IOException, RestException {
+    public RestResponse callApi(String apiName, Map<String, String> params, String body, Map<String, String> headers)
+            throws IOException, RestException {
 
         List<Integer> ignores = new ArrayList<>();
         Map<String, String> requestParams = null;
@@ -152,6 +154,7 @@ public class RestClient implements Closeable {
 
         HttpRequestBuilder httpRequestBuilder = callApiBuilder(apiName, requestParams, body);
         for (Map.Entry<String, String> header : headers.entrySet()) {
+            logger.error("Adding header {}\n with value {}", header.getKey(), header.getValue());
             httpRequestBuilder.addHeader(header.getKey(), header.getValue());
         }
         logger.debug("calling api [{}]", apiName);
@@ -186,6 +189,19 @@ public class RestClient implements Closeable {
     }
 
     private HttpRequestBuilder callApiBuilder(String apiName, Map<String, String> params, String body) {
+        if ("raw".equals(apiName)) {
+            // Raw requests are bit simpler....
+            HttpRequestBuilder httpRequestBuilder = httpRequestBuilder();
+            httpRequestBuilder.method(requireNonNull(params.remove("method"), "Method must be set to use raw request"));
+            httpRequestBuilder.path("/"+ requireNonNull(params.remove("path"), "Path must be set to use raw request"));
+            httpRequestBuilder.body(body);
+
+            // And everything else is a url parameter!
+            for (Map.Entry<String, String> entry : params.entrySet()) {
+                httpRequestBuilder.addParam(entry.getKey(), entry.getValue());
+            }
+            return httpRequestBuilder;
+        }
 
         //create doesn't exist in the spec but is supported in the clients (index with op_type=create)
         boolean indexCreateApi = "create".equals(apiName);
@@ -204,7 +220,8 @@ public class RestClient implements Closeable {
                     if (restApi.getParams().contains(entry.getKey()) || ALWAYS_ACCEPTED_QUERY_STRING_PARAMS.contains(entry.getKey())) {
                         httpRequestBuilder.addParam(entry.getKey(), entry.getValue());
                     } else {
-                        throw new IllegalArgumentException("param [" + entry.getKey() + "] not supported in [" + restApi.getName() + "] api");
+                        throw new IllegalArgumentException("param [" + entry.getKey() +
+                                "] not supported in [" + restApi.getName() + "] api");
                     }
                 }
             }
@@ -246,17 +263,18 @@ public class RestClient implements Closeable {
         return restApi;
     }
 
-    protected HttpRequestBuilder httpRequestBuilder(InetSocketAddress address) {
+    protected HttpRequestBuilder httpRequestBuilder(URL url) {
         return new HttpRequestBuilder(httpClient)
-                .addHeaders(headers)
+                .addHeaders(threadContext.getHeaders())
                 .protocol(protocol)
-                .host(NetworkAddress.formatAddress(address.getAddress())).port(address.getPort());
+                .host(url.getHost())
+                .port(url.getPort());
     }
 
     protected HttpRequestBuilder httpRequestBuilder() {
         //the address used is randomized between the available ones
-        InetSocketAddress address = RandomizedTest.randomFrom(addresses);
-        return httpRequestBuilder(address);
+        URL url = RandomizedTest.randomFrom(urls);
+        return httpRequestBuilder(url);
     }
 
     protected CloseableHttpClient createHttpClient(Settings settings) throws IOException {
@@ -276,9 +294,7 @@ public class RestClient implements Closeable {
                 try (InputStream is = Files.newInputStream(path)) {
                     keyStore.load(is, keystorePass.toCharArray());
                 }
-                SSLContext sslcontext = SSLContexts.custom()
-                        .loadTrustMaterial(keyStore, null)
-                        .build();
+                SSLContext sslcontext = SSLContexts.custom().loadTrustMaterial(keyStore, null).build();
                 sslsf = new SSLConnectionSocketFactory(sslcontext);
             } catch (KeyStoreException|NoSuchAlgorithmException|KeyManagementException|CertificateException e) {
                 throw new RuntimeException(e);
@@ -291,7 +307,8 @@ public class RestClient implements Closeable {
                 .register("http", PlainConnectionSocketFactory.getSocketFactory())
                 .register("https", sslsf)
                 .build();
-        return HttpClients.createMinimal(new PoolingHttpClientConnectionManager(socketFactoryRegistry, null, null, null, 15, TimeUnit.SECONDS));
+        return HttpClients.createMinimal(
+                new PoolingHttpClientConnectionManager(socketFactoryRegistry, null, null, null, 15, TimeUnit.SECONDS));
     }
 
     /**

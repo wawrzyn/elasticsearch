@@ -22,20 +22,19 @@ package org.elasticsearch.index.mapper.internal;
 import org.apache.lucene.document.Field;
 import org.apache.lucene.document.NumericDocValuesField;
 import org.apache.lucene.index.DocValuesType;
-import org.elasticsearch.Version;
-import org.elasticsearch.common.Strings;
+import org.apache.lucene.search.Query;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.xcontent.XContentBuilder;
-import org.elasticsearch.index.fielddata.FieldDataType;
 import org.elasticsearch.index.mapper.MappedFieldType;
 import org.elasticsearch.index.mapper.Mapper;
 import org.elasticsearch.index.mapper.MapperParsingException;
 import org.elasticsearch.index.mapper.MetadataFieldMapper;
 import org.elasticsearch.index.mapper.ParseContext;
 import org.elasticsearch.index.mapper.ParseContext.Document;
+import org.elasticsearch.index.query.QueryShardContext;
+import org.elasticsearch.index.query.QueryShardException;
 
 import java.io.IOException;
-import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 
@@ -58,31 +57,10 @@ public class VersionFieldMapper extends MetadataFieldMapper {
         }
     }
 
-    public static class Builder extends MetadataFieldMapper.Builder<Builder, VersionFieldMapper> {
-
-        public Builder() {
-            super(Defaults.NAME, Defaults.FIELD_TYPE, Defaults.FIELD_TYPE);
-        }
-
-        @Override
-        public VersionFieldMapper build(BuilderContext context) {
-            return new VersionFieldMapper(context.indexSettings());
-        }
-    }
-
     public static class TypeParser implements MetadataFieldMapper.TypeParser {
         @Override
         public MetadataFieldMapper.Builder<?, ?> parse(String name, Map<String, Object> node, ParserContext parserContext) throws MapperParsingException {
-            Builder builder = new Builder();
-            for (Iterator<Map.Entry<String, Object>> iterator = node.entrySet().iterator(); iterator.hasNext();) {
-                Map.Entry<String, Object> entry = iterator.next();
-                String fieldName = Strings.toUnderscoreCase(entry.getKey());
-                if (fieldName.equals("doc_values_format") && parserContext.indexVersionCreated().before(Version.V_2_0_0_beta1)) {
-                    // ignore in 1.x, reject in 2.x
-                    iterator.remove();
-                }
-            }
-            return builder;
+            throw new MapperParsingException(NAME + " is not configurable");
         }
 
         @Override
@@ -94,7 +72,6 @@ public class VersionFieldMapper extends MetadataFieldMapper {
     static final class VersionFieldType extends MappedFieldType {
 
         public VersionFieldType() {
-            setFieldDataType(new FieldDataType("long"));
         }
 
         protected VersionFieldType(VersionFieldType ref) {
@@ -112,12 +89,8 @@ public class VersionFieldMapper extends MetadataFieldMapper {
         }
 
         @Override
-        public Long value(Object value) {
-            if (value == null || (value instanceof Long)) {
-                return (Long) value;
-            } else {
-                return Long.parseLong(value.toString());
-            }
+        public Query termQuery(Object value, QueryShardContext context) {
+            throw new QueryShardException(context, "The _version field is not searchable");
         }
     }
 

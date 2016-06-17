@@ -28,21 +28,12 @@ public class ExternalMapperPlugin extends Plugin {
     public static final String EXTERNAL_BIS = "external_bis";
     public static final String EXTERNAL_UPPER = "external_upper";
 
-    @Override
-    public String name() {
-        return "external-mappers";
-    }
-
-    @Override
-    public String description() {
-        return "External Mappers Plugin";
-    }
-
     public void onModule(IndicesModule indicesModule) {
         indicesModule.registerMetadataMapper(ExternalMetadataMapper.CONTENT_TYPE, new ExternalMetadataMapper.TypeParser());
         indicesModule.registerMapper(EXTERNAL, new ExternalMapper.TypeParser(EXTERNAL, "foo"));
         indicesModule.registerMapper(EXTERNAL_BIS, new ExternalMapper.TypeParser(EXTERNAL_BIS, "bar"));
         indicesModule.registerMapper(EXTERNAL_UPPER, new ExternalMapper.TypeParser(EXTERNAL_UPPER, "FOO BAR"));
+        indicesModule.registerMapper(FakeStringFieldMapper.CONTENT_TYPE, new FakeStringFieldMapper.TypeParser());
     }
 
 }

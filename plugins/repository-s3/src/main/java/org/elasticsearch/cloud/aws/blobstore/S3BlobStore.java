@@ -36,7 +36,6 @@ import org.elasticsearch.common.blobstore.BlobStore;
 import org.elasticsearch.common.blobstore.BlobStoreException;
 import org.elasticsearch.common.component.AbstractComponent;
 import org.elasticsearch.common.settings.Settings;
-import org.elasticsearch.common.unit.ByteSizeUnit;
 import org.elasticsearch.common.unit.ByteSizeValue;
 
 import java.util.ArrayList;
@@ -46,8 +45,6 @@ import java.util.Locale;
  *
  */
 public class S3BlobStore extends AbstractComponent implements BlobStore {
-
-    public static final ByteSizeValue MIN_BUFFER_SIZE = new ByteSizeValue(5, ByteSizeUnit.MB);
 
     private final AmazonS3 client;
 
@@ -72,12 +69,7 @@ public class S3BlobStore extends AbstractComponent implements BlobStore {
         this.bucket = bucket;
         this.region = region;
         this.serverSideEncryption = serverSideEncryption;
-
-        this.bufferSize = (bufferSize != null) ? bufferSize : MIN_BUFFER_SIZE;
-        if (this.bufferSize.getBytes() < MIN_BUFFER_SIZE.getBytes()) {
-            throw new BlobStoreException("Detected a buffer_size for the S3 storage lower than [" + MIN_BUFFER_SIZE + "]");
-        }
-
+        this.bufferSize = bufferSize;
         this.cannedACL = initCannedACL(cannedACL);
         this.numberOfRetries = maxRetries;
         this.storageClass = initStorageClass(storageClass);
@@ -153,11 +145,7 @@ public class S3BlobStore extends AbstractComponent implements BlobStore {
             if (prevListing != null) {
                 list = client.listNextBatchOfObjects(prevListing);
             } else {
-                String keyPath = path.buildAsString("/");
-                if (!keyPath.isEmpty()) {
-                    keyPath = keyPath + "/";
-                }
-                list = client.listObjects(bucket, keyPath);
+                list = client.listObjects(bucket, path.buildAsString());
                 multiObjectDeleteRequest = new DeleteObjectsRequest(list.getBucketName());
             }
             for (S3ObjectSummary summary : list.getObjectSummaries()) {

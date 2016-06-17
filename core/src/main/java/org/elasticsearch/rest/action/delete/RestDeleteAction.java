@@ -41,7 +41,7 @@ public class RestDeleteAction extends BaseRestHandler {
 
     @Inject
     public RestDeleteAction(Settings settings, RestController controller, Client client) {
-        super(settings, controller, client);
+        super(settings, client);
         controller.registerHandler(DELETE, "/{index}/{type}/{id}", this);
     }
 
@@ -51,7 +51,7 @@ public class RestDeleteAction extends BaseRestHandler {
         deleteRequest.routing(request.param("routing"));
         deleteRequest.parent(request.param("parent")); // order is important, set it after routing, so it will set the routing
         deleteRequest.timeout(request.paramAsTime("timeout", DeleteRequest.DEFAULT_TIMEOUT));
-        deleteRequest.refresh(request.paramAsBoolean("refresh", deleteRequest.refresh()));
+        deleteRequest.setRefreshPolicy(request.param("refresh"));
         deleteRequest.version(RestActions.parseVersion(request));
         deleteRequest.versionType(VersionType.fromString(request.param("version_type"), deleteRequest.versionType()));
 

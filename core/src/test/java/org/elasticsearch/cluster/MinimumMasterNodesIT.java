@@ -22,6 +22,7 @@ package org.elasticsearch.cluster;
 import org.elasticsearch.action.admin.cluster.health.ClusterHealthResponse;
 import org.elasticsearch.client.Client;
 import org.elasticsearch.cluster.metadata.MetaData;
+import org.elasticsearch.cluster.service.ClusterService;
 import org.elasticsearch.common.Priority;
 import org.elasticsearch.common.Strings;
 import org.elasticsearch.common.settings.Settings;
@@ -50,7 +51,6 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Predicate;
 
-import static org.elasticsearch.common.settings.Settings.settingsBuilder;
 import static org.elasticsearch.test.hamcrest.ElasticsearchAssertions.assertAcked;
 import static org.elasticsearch.test.hamcrest.ElasticsearchAssertions.assertHitCount;
 import static org.elasticsearch.test.hamcrest.ElasticsearchAssertions.assertNoTimeout;
@@ -62,6 +62,7 @@ import static org.hamcrest.Matchers.nullValue;
 
 @ClusterScope(scope = Scope.TEST, numDataNodes = 0)
 @ESIntegTestCase.SuppressLocalMode
+@TestLogging("_root:DEBUG,cluster.service:TRACE,discovery.zen:TRACE")
 public class MinimumMasterNodesIT extends ESIntegTestCase {
 
     @Override
@@ -71,13 +72,12 @@ public class MinimumMasterNodesIT extends ESIntegTestCase {
         return classes;
     }
 
-    @TestLogging("cluster.service:TRACE,discovery.zen:TRACE,gateway:TRACE,transport.tracer:TRACE")
     public void testSimpleMinimumMasterNodes() throws Exception {
 
-        Settings settings = settingsBuilder()
+        Settings settings = Settings.builder()
                 .put("discovery.type", "zen")
                 .put("discovery.zen.minimum_master_nodes", 2)
-                .put(ZenDiscovery.SETTING_PING_TIMEOUT, "200ms")
+                .put(ZenDiscovery.PING_TIMEOUT_SETTING.getKey(), "200ms")
                 .put("discovery.initial_state_timeout", "500ms")
                 .build();
 
@@ -87,7 +87,7 @@ public class MinimumMasterNodesIT extends ESIntegTestCase {
         logger.info("--> should be blocked, no master...");
         ClusterState state = client().admin().cluster().prepareState().setLocal(true).execute().actionGet().getState();
         assertThat(state.blocks().hasGlobalBlock(DiscoverySettings.NO_MASTER_BLOCK_ID), equalTo(true));
-        assertThat(state.nodes().size(), equalTo(1)); // verify that we still see the local node in the cluster state
+        assertThat(state.nodes().getSize(), equalTo(1)); // verify that we still see the local node in the cluster state
 
         logger.info("--> start second node, cluster should be formed");
         internalCluster().startNode(settings);
@@ -101,7 +101,7 @@ public class MinimumMasterNodesIT extends ESIntegTestCase {
         assertThat(state.blocks().hasGlobalBlock(DiscoverySettings.NO_MASTER_BLOCK_ID), equalTo(false));
 
         state = client().admin().cluster().prepareState().execute().actionGet().getState();
-        assertThat(state.nodes().size(), equalTo(2));
+        assertThat(state.nodes().getSize(), equalTo(2));
         assertThat(state.metaData().indices().containsKey("test"), equalTo(false));
 
         createIndex("test");
@@ -117,7 +117,7 @@ public class MinimumMasterNodesIT extends ESIntegTestCase {
 
         logger.info("--> verify we the data back");
         for (int i = 0; i < 10; i++) {
-            assertThat(client().prepareSearch().setSize(0).setQuery(QueryBuilders.matchAllQuery()).execute().actionGet().getHits().totalHits(), equalTo(100l));
+            assertThat(client().prepareSearch().setSize(0).setQuery(QueryBuilders.matchAllQuery()).execute().actionGet().getHits().totalHits(), equalTo(100L));
         }
 
         internalCluster().stopCurrentMasterNode();
@@ -127,7 +127,7 @@ public class MinimumMasterNodesIT extends ESIntegTestCase {
         });
         state = client().admin().cluster().prepareState().setLocal(true).execute().actionGet().getState();
         assertThat(state.blocks().hasGlobalBlock(DiscoverySettings.NO_MASTER_BLOCK_ID), equalTo(true));
-        assertThat(state.nodes().size(), equalTo(1)); // verify that we still see the local node in the cluster state
+        assertThat(state.nodes().getSize(), equalTo(1)); // verify that we still see the local node in the cluster state
 
         logger.info("--> starting the previous master node again...");
         internalCluster().startNode(settings);
@@ -141,7 +141,7 @@ public class MinimumMasterNodesIT extends ESIntegTestCase {
         assertThat(state.blocks().hasGlobalBlock(DiscoverySettings.NO_MASTER_BLOCK_ID), equalTo(false));
 
         state = client().admin().cluster().prepareState().execute().actionGet().getState();
-        assertThat(state.nodes().size(), equalTo(2));
+        assertThat(state.nodes().getSize(), equalTo(2));
         assertThat(state.metaData().indices().containsKey("test"), equalTo(true));
 
         ensureGreen();
@@ -173,7 +173,7 @@ public class MinimumMasterNodesIT extends ESIntegTestCase {
         assertThat(state.blocks().hasGlobalBlock(DiscoverySettings.NO_MASTER_BLOCK_ID), equalTo(false));
 
         state = client().admin().cluster().prepareState().execute().actionGet().getState();
-        assertThat(state.nodes().size(), equalTo(2));
+        assertThat(state.nodes().getSize(), equalTo(2));
         assertThat(state.metaData().indices().containsKey("test"), equalTo(true));
 
         logger.info("Running Cluster Health");
@@ -186,10 +186,10 @@ public class MinimumMasterNodesIT extends ESIntegTestCase {
     }
 
     public void testMultipleNodesShutdownNonMasterNodes() throws Exception {
-        Settings settings = settingsBuilder()
+        Settings settings = Settings.builder()
                 .put("discovery.type", "zen")
                 .put("discovery.zen.minimum_master_nodes", 3)
-                .put(ZenDiscovery.SETTING_PING_TIMEOUT, "1s")
+                .put(ZenDiscovery.PING_TIMEOUT_SETTING.getKey(), "1s")
                 .put("discovery.initial_state_timeout", "500ms")
                 .build();
 
@@ -216,7 +216,7 @@ public class MinimumMasterNodesIT extends ESIntegTestCase {
         assertThat(clusterHealthResponse.isTimedOut(), equalTo(false));
 
         state = client().admin().cluster().prepareState().execute().actionGet().getState();
-        assertThat(state.nodes().size(), equalTo(4));
+        assertThat(state.nodes().getSize(), equalTo(4));
 
         createIndex("test");
         NumShards numShards = getNumShards("test");
@@ -251,9 +251,9 @@ public class MinimumMasterNodesIT extends ESIntegTestCase {
         assertThat(clusterHealthResponse.isTimedOut(), equalTo(false));
 
         state = client().admin().cluster().prepareState().execute().actionGet().getState();
-        assertThat(state.nodes().size(), equalTo(4));
+        assertThat(state.nodes().getSize(), equalTo(4));
         // we prefer to elect up and running nodes
-        assertThat(state.nodes().masterNodeId(), not(isOneOf(newNodes)));
+        assertThat(state.nodes().getMasterNodeId(), not(isOneOf(newNodes)));
 
         logger.info("--> verify we the data back");
         for (int i = 0; i < 10; i++) {
@@ -262,9 +262,9 @@ public class MinimumMasterNodesIT extends ESIntegTestCase {
     }
 
     public void testDynamicUpdateMinimumMasterNodes() throws Exception {
-        Settings settings = settingsBuilder()
+        Settings settings = Settings.builder()
                 .put("discovery.type", "zen")
-                .put(ZenDiscovery.SETTING_PING_TIMEOUT, "400ms")
+                .put(ZenDiscovery.PING_TIMEOUT_SETTING.getKey(), "400ms")
                 .put("discovery.initial_state_timeout", "500ms")
                 .build();
 
@@ -279,7 +279,7 @@ public class MinimumMasterNodesIT extends ESIntegTestCase {
         setMinimumMasterNodes(2);
 
         // make sure it has been processed on all nodes (master node spawns a secondary cluster state update task)
-        for (Client client : internalCluster()) {
+        for (Client client : internalCluster().getClients()) {
             assertThat(client.admin().cluster().prepareHealth().setWaitForEvents(Priority.LANGUID).setLocal(true).get().isTimedOut(),
                     equalTo(false));
         }
@@ -290,7 +290,7 @@ public class MinimumMasterNodesIT extends ESIntegTestCase {
         assertNoMasterBlockOnAllNodes();
 
         logger.info("--> bringing another node up");
-        internalCluster().startNode(settingsBuilder().put(settings).put(ElectMasterService.DISCOVERY_ZEN_MINIMUM_MASTER_NODES_SETTING.getKey(), 2).build());
+        internalCluster().startNode(Settings.builder().put(settings).put(ElectMasterService.DISCOVERY_ZEN_MINIMUM_MASTER_NODES_SETTING.getKey(), 2).build());
         clusterHealthResponse = client().admin().cluster().prepareHealth().setWaitForEvents(Priority.LANGUID).setWaitForNodes("2").get();
         assertThat(clusterHealthResponse.isTimedOut(), equalTo(false));
     }
@@ -303,7 +303,7 @@ public class MinimumMasterNodesIT extends ESIntegTestCase {
         assertTrue(awaitBusy(
                         () -> {
                             boolean success = true;
-                            for (Client client : internalCluster()) {
+                            for (Client client : internalCluster().getClients()) {
                                 boolean clientHasNoMasterBlock = hasNoMasterBlock.test(client);
                                 if (logger.isDebugEnabled()) {
                                     logger.debug("Checking for NO_MASTER_BLOCK on client: {} NO_MASTER_BLOCK: [{}]", client, clientHasNoMasterBlock);
@@ -320,9 +320,9 @@ public class MinimumMasterNodesIT extends ESIntegTestCase {
 
     public void testCanNotBringClusterDown() throws ExecutionException, InterruptedException {
         int nodeCount = scaledRandomIntBetween(1, 5);
-        Settings.Builder settings = settingsBuilder()
+        Settings.Builder settings = Settings.builder()
                 .put("discovery.type", "zen")
-                .put(ZenDiscovery.SETTING_PING_TIMEOUT, "200ms")
+                .put(ZenDiscovery.PING_TIMEOUT_SETTING.getKey(), "200ms")
                 .put("discovery.initial_state_timeout", "500ms");
 
         // set an initial value which is at least quorum to avoid split brains during initial startup
@@ -340,7 +340,7 @@ public class MinimumMasterNodesIT extends ESIntegTestCase {
 
         logger.info("--> updating [{}] to [{}]", ElectMasterService.DISCOVERY_ZEN_MINIMUM_MASTER_NODES_SETTING.getKey(), updateCount);
         assertAcked(client().admin().cluster().prepareUpdateSettings()
-                .setPersistentSettings(settingsBuilder().put(ElectMasterService.DISCOVERY_ZEN_MINIMUM_MASTER_NODES_SETTING.getKey(), updateCount)));
+                .setPersistentSettings(Settings.builder().put(ElectMasterService.DISCOVERY_ZEN_MINIMUM_MASTER_NODES_SETTING.getKey(), updateCount)));
 
         logger.info("--> verifying no node left and master is up");
         assertFalse(client().admin().cluster().prepareHealth().setWaitForNodes(Integer.toString(nodeCount)).get().isTimedOut());
@@ -349,7 +349,7 @@ public class MinimumMasterNodesIT extends ESIntegTestCase {
         logger.info("--> trying to updating [{}] to [{}]", ElectMasterService.DISCOVERY_ZEN_MINIMUM_MASTER_NODES_SETTING.getKey(), updateCount);
         try {
             client().admin().cluster().prepareUpdateSettings()
-                    .setPersistentSettings(settingsBuilder().put(ElectMasterService.DISCOVERY_ZEN_MINIMUM_MASTER_NODES_SETTING.getKey(), updateCount));
+                    .setPersistentSettings(Settings.builder().put(ElectMasterService.DISCOVERY_ZEN_MINIMUM_MASTER_NODES_SETTING.getKey(), updateCount));
         } catch (IllegalArgumentException ex) {
             assertEquals(ex.getMessage(), "cannot set discovery.zen.minimum_master_nodes to more than the current master nodes count [" +updateCount+ "]");
         }
@@ -359,10 +359,10 @@ public class MinimumMasterNodesIT extends ESIntegTestCase {
     }
 
     public void testCanNotPublishWithoutMinMastNodes() throws Exception {
-        Settings settings = settingsBuilder()
+        Settings settings = Settings.builder()
                 .put("discovery.type", "zen")
-                .put(FaultDetection.SETTING_PING_TIMEOUT, "1h") // disable it
-                .put(ZenDiscovery.SETTING_PING_TIMEOUT, "200ms")
+                .put(FaultDetection.PING_TIMEOUT_SETTING.getKey(), "1h") // disable it
+                .put(ZenDiscovery.PING_TIMEOUT_SETTING.getKey(), "200ms")
                 .put(ElectMasterService.DISCOVERY_ZEN_MINIMUM_MASTER_NODES_SETTING.getKey(), 2)
                 .put(DiscoverySettings.COMMIT_TIMEOUT_SETTING.getKey(), "100ms") // speed things up
                 .build();
@@ -408,7 +408,7 @@ public class MinimumMasterNodesIT extends ESIntegTestCase {
         assertBusy(new Runnable() {
             @Override
             public void run() {
-                assertThat(masterClusterService.state().nodes().masterNode(), nullValue());
+                assertThat(masterClusterService.state().nodes().getMasterNode(), nullValue());
             }
         });
 

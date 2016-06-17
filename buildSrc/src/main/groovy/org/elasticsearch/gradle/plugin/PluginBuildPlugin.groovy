@@ -18,11 +18,13 @@
  */
 package org.elasticsearch.gradle.plugin
 
+import nebula.plugin.publishing.maven.MavenBasePublishPlugin
+import nebula.plugin.publishing.maven.MavenManifestPlugin
+import nebula.plugin.publishing.maven.MavenScmPlugin
 import org.elasticsearch.gradle.BuildPlugin
 import org.elasticsearch.gradle.test.RestIntegTestTask
 import org.elasticsearch.gradle.test.RunTask
 import org.gradle.api.Project
-import org.gradle.api.artifacts.Dependency
 import org.gradle.api.tasks.SourceSet
 import org.gradle.api.tasks.bundling.Zip
 
@@ -50,6 +52,12 @@ public class PluginBuildPlugin extends BuildPlugin {
             } else {
                 project.integTest.clusterConfig.plugin(name, project.bundlePlugin.outputs.files)
                 project.tasks.run.clusterConfig.plugin(name, project.bundlePlugin.outputs.files)
+                addPomGeneration(project)
+            }
+
+            project.namingConventions {
+                // Plugins decalare extensions of ESIntegTestCase as "Tests" instead of IT.
+                skipIntegTestInDisguise = true
             }
         }
         createIntegTestTask(project)
@@ -63,11 +71,10 @@ public class PluginBuildPlugin extends BuildPlugin {
             testCompile "org.elasticsearch.test:framework:${project.versions.elasticsearch}"
             // we "upgrade" these optional deps to provided for plugins, since they will run
             // with a full elasticsearch server that includes optional deps
-            provided "com.spatial4j:spatial4j:${project.versions.spatial4j}"
+            provided "org.locationtech.spatial4j:spatial4j:${project.versions.spatial4j}"
             provided "com.vividsolutions:jts:${project.versions.jts}"
             provided "log4j:log4j:${project.versions.log4j}"
             provided "log4j:apache-log4j-extras:${project.versions.log4j}"
-            provided "org.slf4j:slf4j-api:${project.versions.slf4j}"
             provided "net.java.dev.jna:jna:${project.versions.jna}"
         }
     }
@@ -101,19 +108,14 @@ public class PluginBuildPlugin extends BuildPlugin {
             from pluginMetadata // metadata (eg custom security policy)
             from project.jar // this plugin's jar
             from project.configurations.runtime - project.configurations.provided // the dep jars
-            // hack just for slf4j, in case it is "upgrade" from provided to compile,
-            // since it is not actually provided in distributions
-            from project.configurations.runtime.fileCollection { Dependency dep ->
-                return dep.name == 'slf4j-api' && project.configurations.compile.dependencies.contains(dep)
-            }
             // extra files for the plugin to go into the zip
             from('src/main/packaging') // TODO: move all config/bin/_size/etc into packaging
             from('src/main') {
                 include 'config/**'
                 include 'bin/**'
             }
-            from('src/site') {
-                include '_site/**'
+            if (project.path.startsWith(':modules:') == false) {
+                into('elasticsearch')
             }
         }
         project.assemble.dependsOn(bundle)
@@ -125,5 +127,33 @@ public class PluginBuildPlugin extends BuildPlugin {
         // also make the zip the default artifact (used when depending on this project)
         project.configurations.getByName('default').extendsFrom = []
         project.artifacts.add('default', bundle)
+    }
+
+    /**
+     * Adds the plugin jar and zip as publications.
+     */
+    protected static void addPomGeneration(Project project) {
+        project.plugins.apply(MavenBasePublishPlugin.class)
+        project.plugins.apply(MavenScmPlugin.class)
+
+        project.publishing {
+            publications {
+                nebula {
+                    artifact project.bundlePlugin
+                    pom.withXml {
+                        // overwrite the name/description in the pom nebula set up
+                        Node root = asNode()
+                        for (Node node : root.children()) {
+                            if (node.name() == 'name') {
+                                node.setValue(project.pluginProperties.extension.name)
+                            } else if (node.name() == 'description') {
+                                node.setValue(project.pluginProperties.extension.description)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
     }
 }

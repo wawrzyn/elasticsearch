@@ -24,47 +24,28 @@ import org.apache.lucene.search.Collector;
 import org.apache.lucene.search.Query;
 import org.elasticsearch.common.inject.Inject;
 import org.elasticsearch.common.lucene.search.Queries;
-import org.elasticsearch.search.SearchParseElement;
 import org.elasticsearch.search.SearchPhase;
 import org.elasticsearch.search.aggregations.bucket.global.GlobalAggregator;
 import org.elasticsearch.search.aggregations.pipeline.PipelineAggregator;
 import org.elasticsearch.search.aggregations.pipeline.SiblingPipelineAggregator;
 import org.elasticsearch.search.aggregations.support.AggregationContext;
 import org.elasticsearch.search.internal.SearchContext;
-import org.elasticsearch.search.profile.CollectorResult;
-import org.elasticsearch.search.profile.InternalProfileCollector;
+import org.elasticsearch.search.profile.query.CollectorResult;
+import org.elasticsearch.search.profile.query.InternalProfileCollector;
 import org.elasticsearch.search.query.QueryPhaseExecutionException;
 
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
-
-import static java.util.Collections.unmodifiableMap;
 
 /**
  *
  */
 public class AggregationPhase implements SearchPhase {
-    private final Map<String, SearchParseElement> parseElements;
 
     @Inject
-    public AggregationPhase(AggregationParseElement parseElement, AggregationBinaryParseElement binaryParseElement) {
-        Map<String, SearchParseElement> parseElements = new HashMap<>();
-        parseElements.put("aggregations", parseElement);
-        parseElements.put("aggs", parseElement);
-        parseElements.put("aggregations_binary", binaryParseElement);
-        parseElements.put("aggregationsBinary", binaryParseElement);
-        parseElements.put("aggs_binary", binaryParseElement);
-        parseElements.put("aggsBinary", binaryParseElement);
-        this.parseElements = unmodifiableMap(parseElements);
-    }
-
-    @Override
-    public Map<String, ? extends SearchParseElement> parseElements() {
-        return parseElements;
+    public AggregationPhase() {
     }
 
     @Override
@@ -77,7 +58,7 @@ public class AggregationPhase implements SearchPhase {
             Aggregator[] aggregators;
             try {
                 AggregatorFactories factories = context.aggregations().factories();
-                aggregators = factories.createTopLevelAggregators(aggregationContext);
+                aggregators = factories.createTopLevelAggregators();
                 for (int i = 0; i < aggregators.length; i++) {
                     if (aggregators[i] instanceof GlobalAggregator == false) {
                         collectors.add(aggregators[i]);
@@ -124,7 +105,7 @@ public class AggregationPhase implements SearchPhase {
         if (!globals.isEmpty()) {
             BucketCollector globalsCollector = BucketCollector.wrap(globals);
             Query query = Queries.newMatchAllQuery();
-            Query searchFilter = context.searchFilter(context.types());
+            Query searchFilter = context.searchFilter(context.getQueryShardContext().getTypes());
 
             if (searchFilter != null) {
                 BooleanQuery filtered = new BooleanQuery.Builder()
@@ -144,7 +125,7 @@ public class AggregationPhase implements SearchPhase {
                             Collections.emptyList());
                     collector = profileCollector;
                     // start a new profile with this collector
-                    context.getProfilers().addProfiler().setCollector(profileCollector);
+                    context.getProfilers().addQueryProfiler().setCollector(profileCollector);
                 }
                 globalsCollector.preCollection();
                 context.searcher().search(query, collector);

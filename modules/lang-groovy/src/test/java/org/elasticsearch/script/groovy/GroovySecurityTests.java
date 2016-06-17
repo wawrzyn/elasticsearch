@@ -24,7 +24,7 @@ import org.apache.lucene.util.Constants;
 import org.codehaus.groovy.control.MultipleCompilationErrorsException;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.script.CompiledScript;
-import org.elasticsearch.script.ScriptException;
+import org.elasticsearch.script.GeneralScriptException;
 import org.elasticsearch.script.ScriptService;
 import org.elasticsearch.test.ESTestCase;
 
@@ -43,12 +43,6 @@ import java.util.Map;
 public class GroovySecurityTests extends ESTestCase {
 
     private GroovyScriptEngineService se;
-
-    static {
-        // ensure we load all the timezones in the parent classloader with all permissions
-        // relates to https://github.com/elastic/elasticsearch/issues/14524
-        org.joda.time.DateTimeZone.getDefault();
-    }
 
     @Override
     public void setUp() throws Exception {
@@ -83,12 +77,18 @@ public class GroovySecurityTests extends ESTestCase {
         assertSuccess("def range = 1..doc['foo'].value; def v = range.get(0)");
         // Maps
         assertSuccess("def v = doc['foo'].value; def m = [:]; m.put(\"value\", v)");
-        // serialization to json (this is best effort considering the unsafe etc at play)
-        assertSuccess("def x = 5; groovy.json.JsonOutput.toJson(x)");
         // Times
         assertSuccess("def t = Instant.now().getMillis()");
         // GroovyCollections
         assertSuccess("def n = [1,2,3]; GroovyCollections.max(n)");
+        // Groovy closures
+        assertSuccess("[1, 2, 3, 4].findAll { it % 2 == 0 }");
+        assertSuccess("def buckets=[ [2, 4, 6, 8], [10, 12, 16, 14], [18, 22, 20, 24] ]; buckets[-3..-1].every { it.every { i -> i % 2 == 0 } }");
+        assertSuccess("def val = \"\"; [1, 2, 3, 4].each { val += it }; val");
+        // Groovy uses reflection to invoke closures. These reflective calls are optimized by the JVM after "sun.reflect.inflationThreshold"
+        // invocations. After the inflation step, access to sun.reflect.MethodAccessorImpl is required from the security manager. This test,
+        // assuming a inflation threshold below 100 (15 is current value on Oracle JVMs), checks that the relevant permission is available.
+        assertSuccess("(1..100).collect{ it + 1 }");
 
         // Fail cases:
         assertFailure("pr = Runtime.getRuntime().exec(\"touch /tmp/gotcha\"); pr.waitFor()", MissingPropertyException.class);
@@ -132,7 +132,7 @@ public class GroovySecurityTests extends ESTestCase {
         vars.put("myarray", Arrays.asList("foo"));
         vars.put("myobject", new MyObject());
 
-        se.executable(new CompiledScript(ScriptService.ScriptType.INLINE, "test", "js", se.compile(script, Collections.emptyMap())), vars).run();
+        se.executable(new CompiledScript(ScriptService.ScriptType.INLINE, "test", "js", se.compile(null, script, Collections.emptyMap())), vars).run();
     }
 
     public static class MyObject {
@@ -151,7 +151,7 @@ public class GroovySecurityTests extends ESTestCase {
         try {
             doTest(script);
             fail("did not get expected exception");
-        } catch (ScriptException expected) {
+        } catch (GeneralScriptException expected) {
             Throwable cause = expected.getCause();
             assertNotNull(cause);
             if (exceptionClass.isAssignableFrom(cause.getClass()) == false) {

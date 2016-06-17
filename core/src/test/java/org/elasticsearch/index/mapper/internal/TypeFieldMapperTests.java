@@ -24,10 +24,23 @@ import org.elasticsearch.cluster.metadata.IndexMetaData;
 import org.elasticsearch.common.compress.CompressedXContent;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.xcontent.XContentFactory;
+import org.elasticsearch.index.fielddata.plain.DocValuesIndexFieldData;
+import org.elasticsearch.index.fielddata.plain.PagedBytesIndexFieldData;
 import org.elasticsearch.index.mapper.DocumentMapper;
+import org.elasticsearch.plugins.Plugin;
 import org.elasticsearch.test.ESSingleNodeTestCase;
+import org.elasticsearch.test.InternalSettingsPlugin;
+
+import java.util.Collection;
+
+import static org.hamcrest.Matchers.instanceOf;
 
 public class TypeFieldMapperTests extends ESSingleNodeTestCase {
+
+    @Override
+    protected Collection<Class<? extends Plugin>> getPlugins() {
+        return pluginList(InternalSettingsPlugin.class);
+    }
 
     public void testDocValues() throws Exception {
         String mapping = XContentFactory.jsonBuilder().startObject().startObject("type").endObject().endObject().string();
@@ -35,6 +48,7 @@ public class TypeFieldMapperTests extends ESSingleNodeTestCase {
         DocumentMapper docMapper = createIndex("test").mapperService().documentMapperParser().parse("type", new CompressedXContent(mapping));
         TypeFieldMapper typeMapper = docMapper.metadataMapper(TypeFieldMapper.class);
         assertTrue(typeMapper.fieldType().hasDocValues());
+        assertThat(typeMapper.fieldType().fielddataBuilder(), instanceOf(DocValuesIndexFieldData.Builder.class));
     }
 
     public void testDocValuesPre21() throws Exception {
@@ -45,5 +59,6 @@ public class TypeFieldMapperTests extends ESSingleNodeTestCase {
         DocumentMapper docMapper = createIndex("test", bwcSettings).mapperService().documentMapperParser().parse("type", new CompressedXContent(mapping));
         TypeFieldMapper typeMapper = docMapper.metadataMapper(TypeFieldMapper.class);
         assertFalse(typeMapper.fieldType().hasDocValues());
+        assertThat(typeMapper.fieldType().fielddataBuilder(), instanceOf(PagedBytesIndexFieldData.Builder.class));
     }
 }

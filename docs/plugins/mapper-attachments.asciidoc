@@ -1,6 +1,8 @@
 [[mapper-attachments]]
 === Mapper Attachments Plugin
 
+deprecated[5.0.0,The `mapper-attachments` plugin has been replaced by the <<ingest-attachment, `ingest-attachment`>> plugin]
+
 The mapper attachments plugin lets Elasticsearch index file attachments in common formats (such as PPT, XLS, PDF)
 using the Apache text extraction library http://lucene.apache.org/tika/[Tika].
 
@@ -15,7 +17,7 @@ This plugin can be installed using the plugin manager:
 
 [source,sh]
 ----------------------------------------------------------------
-sudo bin/plugin install mapper-attachments
+sudo bin/elasticsearch-plugin install mapper-attachments
 ----------------------------------------------------------------
 
 The plugin must be installed on every node in the cluster, and each node must
@@ -29,7 +31,7 @@ The plugin can be removed with the following command:
 
 [source,sh]
 ----------------------------------------------------------------
-sudo bin/plugin remove mapper-attachments
+sudo bin/elasticsearch-plugin remove mapper-attachments
 ----------------------------------------------------------------
 
 The node must be stopped before removing the plugin.
@@ -49,18 +51,19 @@ POST /trying-out-mapper-attachments
         "cv": { "type": "attachment" }
 }}}}
 --------------------------
-// AUTOSENSE
+// CONSOLE
 
 Index a new document populated with a `base64`-encoded attachment:
 
 [source,js]
 --------------------------
-POST /trying-out-mapper-attachments/person/1
+POST /trying-out-mapper-attachments/person/1?refresh
 {
   "cv": "e1xydGYxXGFuc2kNCkxvcmVtIGlwc3VtIGRvbG9yIHNpdCBhbWV0DQpccGFyIH0="
 }
 --------------------------
-// AUTOSENSE
+// CONSOLE
+// TEST[continued]
 
 Search for the document using words in the attachment:
 
@@ -73,9 +76,36 @@ POST /trying-out-mapper-attachments/person/_search
       "query": "ipsum"
 }}}
 --------------------------
-// AUTOSENSE
+// CONSOLE
+// TEST[continued]
 
-If you get a hit for your indexed document, the plugin should be installed and working.
+If you get a hit for your indexed document, the plugin should be installed and working. It'll look like:
+
+[source,js]
+--------------------------
+{
+  "timed_out": false,
+  "took": 53,
+  "hits": {
+    "total": 1,
+    "max_score": 0.3125,
+    "hits": [
+      {
+        "_score": 0.3125,
+        "_index": "trying-out-mapper-attachments",
+        "_type": "person",
+        "_id": "1",
+        "_source": {
+          "cv": "e1xydGYxXGFuc2kNCkxvcmVtIGlwc3VtIGRvbG9yIHNpdCBhbWV0DQpccGFyIH0="
+        }
+      }
+    ]
+  },
+  "_shards": ...
+}
+--------------------------
+// TESTRESPONSE[s/"took": 53/"took": "$body.took"/]
+// TESTRESPONSE[s/"_shards": \.\.\./"_shards": "$body._shards"/]
 
 [[mapper-attachments-usage]]
 ==== Usage
@@ -85,16 +115,17 @@ Using the attachment type is simple, in your mapping JSON, simply set a certain 
 [source,js]
 --------------------------
 PUT /test
-PUT /test/person/_mapping
 {
+  "mappings": {
     "person" : {
-        "properties" : {
-            "my_attachment" : { "type" : "attachment" }
-        }
+      "properties" : {
+        "my_attachment" : { "type" : "attachment" }
+      }
     }
+  }
 }
 --------------------------
-// AUTOSENSE
+// CONSOLE
 
 In this case, the JSON to index can be:
 
@@ -105,7 +136,7 @@ PUT /test/person/1
     "my_attachment" : "... base64 encoded attachment ..."
 }
 --------------------------
-// AUTOSENSE
+// CONSOLE
 
 Or it is possible to use more elaborated JSON if content type, resource name or language need to be set explicitly:
 
@@ -121,7 +152,7 @@ PUT /test/person/1
     }
 }
 --------------------------
-// AUTOSENSE
+// CONSOLE
 
 The `attachment` type not only indexes the content of the doc in `content` sub field, but also automatically adds meta
 data on the attachment as well (when available).
@@ -139,78 +170,59 @@ The metadata supported are:
 
 They can be queried using the "dot notation", for example: `my_attachment.author`.
 
-Both the meta data and the actual content are simple core type mappers (string, date, …), thus, they can be controlled
+Both the meta data and the actual content are simple core type mappers (text, date, …), thus, they can be controlled
 in the mappings. For example:
 
 [source,js]
 --------------------------
-PUT /test/person/_mapping
+PUT /test
 {
-    "person" : {
-        "properties" : {
-            "file" : {
-                "type" : "attachment",
-                "fields" : {
-                    "content" : {"index" : "no"},
-                    "title" : {"store" : "yes"},
-                    "date" : {"store" : "yes"},
-                    "author" : {"analyzer" : "myAnalyzer"},
-                    "keywords" : {"store" : "yes"},
-                    "content_type" : {"store" : "yes"},
-                    "content_length" : {"store" : "yes"},
-                    "language" : {"store" : "yes"}
-                }
-            }
-        }
-    }
-}
---------------------------
-// AUTOSENSE
-
-In the above example, the actual content indexed is mapped under `fields` name `content`, and we decide not to index it, so
-it will only be available in the `_all` field. The other fields map to their respective metadata names, but there is no
-need to specify the `type` (like `string` or `date`) since it is already known.
-
-[[mapper-attachments-copy-to]]
-==== Copy To feature
-
-If you want to use http://www.elasticsearch.org/guide/en/elasticsearch/reference/current/mapping-core-types.html#copy-to[copy_to]
-feature, you need to define it on each sub-field you want to copy to another field:
-
-[source,js]
---------------------------
-PUT /test/person/_mapping
-{
-  "person": {
-    "properties": {
-      "file": {
-        "type": "attachment",
-        "fields": {
-          "content": {
-            "type": "string",
-            "copy_to": "copy"
+  "settings": {
+    "index": {
+      "analysis": {
+        "analyzer": {
+          "my_analyzer": {
+            "type": "custom",
+            "tokenizer": "standard",
+            "filter": ["standard"]
           }
         }
-      },
-      "copy": {
-        "type": "string"
+      }
+    }
+  },
+  "mappings": {
+    "person" : {
+      "properties" : {
+        "file" : {
+          "type" : "attachment",
+          "fields" : {
+            "content" : {"index" : "no"},
+            "title" : {"store" : "yes"},
+            "date" : {"store" : "yes"},
+            "author" : {"analyzer" : "my_analyzer"},
+            "keywords" : {"store" : "yes"},
+            "content_type" : {"store" : "yes"},
+            "content_length" : {"store" : "yes"},
+            "language" : {"store" : "yes"}
+          }
+        }
       }
     }
   }
 }
 --------------------------
-// AUTOSENSE
+// CONSOLE
 
-In this example, the extracted content will be copy as well to `copy` field.
+In the above example, the actual content indexed is mapped under `fields` name `content`, and we decide not to index it, so
+it will only be available in the `_all` field. The other fields map to their respective metadata names, but there is no
+need to specify the `type` (like `text` or `date`) since it is already known.
 
-[[mapper-attachments-querying-metadata]]
 ==== Querying or accessing metadata
 
 If you need to query on metadata fields, use the attachment field name dot the metadata field. For example:
 
 [source,js]
 --------------------------
-DELETE /test
 PUT /test
 PUT /test/person/_mapping
 {
@@ -220,7 +232,7 @@ PUT /test/person/_mapping
         "type": "attachment",
         "fields": {
           "content_type": {
-            "type": "string",
+            "type": "text",
             "store": true
           }
         }
@@ -242,7 +254,7 @@ GET /test/person/_search
   }
 }
 --------------------------
-// AUTOSENSE
+// CONSOLE
 
 Will give you:
 
@@ -294,7 +306,7 @@ PUT /test/person/1
     }
 }
 --------------------------
-// AUTOSENSE
+// CONSOLE
 
 [[mapper-attachments-error-handling]]
 ==== Metadata parsing error handling
@@ -331,7 +343,6 @@ If you want to highlight your attachment content, you will need to set `"store":
 
 [source,js]
 --------------------------
-DELETE /test
 PUT /test
 PUT /test/person/_mapping
 {
@@ -341,7 +352,7 @@ PUT /test/person/_mapping
         "type": "attachment",
         "fields": {
           "content": {
-            "type": "string",
+            "type": "text",
             "term_vector":"with_positions_offsets",
             "store": true
           }
@@ -370,7 +381,7 @@ GET /test/person/_search
   }
 }
 --------------------------
-// AUTOSENSE
+// CONSOLE
 
 It gives back:
 
@@ -402,42 +413,4 @@ It gives back:
       ]
    }
 }
---------------------------
-
-[[mapper-attachments-standalone]]
-==== Stand alone runner
-
-If you want to run some tests within your IDE, you can use `StandaloneRunner` class.
-It accepts arguments:
-
-* `-u file://URL/TO/YOUR/DOC`
-* `--size` set extracted size (default to mapper attachment size)
-* `BASE64` encoded binary
-
-Example:
-
-[source,sh]
---------------------------
-StandaloneRunner BASE64Text
-StandaloneRunner -u /tmp/mydoc.pdf
-StandaloneRunner -u /tmp/mydoc.pdf --size 1000000
---------------------------
-
-It produces something like:
-
-[source,text]
---------------------------
-## Extracted text
---------------------- BEGIN -----------------------
-This is the extracted text
----------------------- END ------------------------
-## Metadata
-- author: null
-- content_length: null
-- content_type: application/pdf
-- date: null
-- keywords: null
-- language: null
-- name: null
-- title: null
 --------------------------

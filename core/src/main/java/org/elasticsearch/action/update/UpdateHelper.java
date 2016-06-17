@@ -22,6 +22,8 @@ package org.elasticsearch.action.update;
 import org.elasticsearch.action.delete.DeleteRequest;
 import org.elasticsearch.action.index.IndexRequest;
 import org.elasticsearch.client.Requests;
+import org.elasticsearch.cluster.ClusterState;
+import org.elasticsearch.cluster.service.ClusterService;
 import org.elasticsearch.common.Nullable;
 import org.elasticsearch.common.bytes.BytesReference;
 import org.elasticsearch.common.collect.Tuple;
@@ -44,6 +46,7 @@ import org.elasticsearch.index.mapper.internal.TimestampFieldMapper;
 import org.elasticsearch.index.shard.IndexShard;
 import org.elasticsearch.index.shard.ShardId;
 import org.elasticsearch.script.ExecutableScript;
+import org.elasticsearch.script.Script;
 import org.elasticsearch.script.ScriptContext;
 import org.elasticsearch.script.ScriptService;
 import org.elasticsearch.search.fetch.source.FetchSourceContext;
@@ -60,11 +63,13 @@ import java.util.Map;
 public class UpdateHelper extends AbstractComponent {
 
     private final ScriptService scriptService;
+    private final ClusterService clusterService;
 
     @Inject
-    public UpdateHelper(Settings settings, ScriptService scriptService) {
+    public UpdateHelper(Settings settings, ScriptService scriptService, ClusterService clusterService) {
         super(settings);
         this.scriptService = scriptService;
+        this.clusterService = clusterService;
     }
 
     /**
@@ -75,16 +80,15 @@ public class UpdateHelper extends AbstractComponent {
         final GetResult getResult = indexShard.getService().get(request.type(), request.id(),
                 new String[]{RoutingFieldMapper.NAME, ParentFieldMapper.NAME, TTLFieldMapper.NAME, TimestampFieldMapper.NAME},
                 true, request.version(), request.versionType(), FetchSourceContext.FETCH_SOURCE, false);
-        return prepare(request, getResult);
+        return prepare(indexShard.shardId(), request, getResult);
     }
 
     /**
      * Prepares an update request by converting it into an index or delete request or an update response (no action).
      */
     @SuppressWarnings("unchecked")
-    protected Result prepare(UpdateRequest request, final GetResult getResult) {
+    protected Result prepare(ShardId shardId, UpdateRequest request, final GetResult getResult) {
         long getDateNS = System.nanoTime();
-        final ShardId shardId = new ShardId(getResult.getIndex(), request.shardId());
         if (!getResult.isExists()) {
             if (request.upsertRequest() == null && !request.docAsUpsert()) {
                 throw new DocumentMissingException(shardId, request.type(), request.id());
@@ -99,7 +103,7 @@ public class UpdateHelper extends AbstractComponent {
                 // Tell the script that this is a create and not an update
                 ctx.put("op", "create");
                 ctx.put("_source", upsertDoc);
-                ctx = executeScript(request, ctx);
+                ctx = executeScript(request.script, ctx);
                 //Allow the script to set TTL using ctx._ttl
                 if (ttl == null) {
                     ttl = getTTLFromScriptContext(ctx);
@@ -127,7 +131,7 @@ public class UpdateHelper extends AbstractComponent {
                     // it has to be a "create!"
                     .create(true)
                     .ttl(ttl)
-                    .refresh(request.refresh())
+                    .setRefreshPolicy(request.getRefreshPolicy())
                     .routing(request.routing())
                     .parent(request.parent())
                     .consistencyLevel(request.consistencyLevel());
@@ -193,7 +197,7 @@ public class UpdateHelper extends AbstractComponent {
             ctx.put("_ttl", originalTtl);
             ctx.put("_source", sourceAndContent.v2());
 
-            ctx = executeScript(request, ctx);
+            ctx = executeScript(request.script, ctx);
 
             operation = (String) ctx.get("op");
 
@@ -225,12 +229,13 @@ public class UpdateHelper extends AbstractComponent {
                     .version(updateVersion).versionType(request.versionType())
                     .consistencyLevel(request.consistencyLevel())
                     .timestamp(timestamp).ttl(ttl)
-                    .refresh(request.refresh());
+                    .setRefreshPolicy(request.getRefreshPolicy());
             return new Result(indexRequest, Operation.INDEX, updatedSourceAsMap, updateSourceContentType);
         } else if ("delete".equals(operation)) {
             DeleteRequest deleteRequest = Requests.deleteRequest(request.index()).type(request.type()).id(request.id()).routing(routing).parent(parent)
                     .version(updateVersion).versionType(request.versionType())
-                    .consistencyLevel(request.consistencyLevel());
+                    .consistencyLevel(request.consistencyLevel())
+                    .setRefreshPolicy(request.getRefreshPolicy());
             return new Result(deleteRequest, Operation.DELETE, updatedSourceAsMap, updateSourceContentType);
         } else if ("none".equals(operation)) {
             UpdateResponse update = new UpdateResponse(shardId, getResult.getType(), getResult.getId(), getResult.getVersion(), false);
@@ -243,14 +248,15 @@ public class UpdateHelper extends AbstractComponent {
         }
     }
 
-    private Map<String, Object> executeScript(UpdateRequest request, Map<String, Object> ctx) {
+    private Map<String, Object> executeScript(Script script, Map<String, Object> ctx) {
         try {
             if (scriptService != null) {
-                ExecutableScript script = scriptService.executable(request.script, ScriptContext.Standard.UPDATE, request, Collections.emptyMap());
-                script.setNextVar("ctx", ctx);
-                script.run();
+                ClusterState state = clusterService.state();
+                ExecutableScript executableScript = scriptService.executable(script, ScriptContext.Standard.UPDATE, Collections.emptyMap(), state);
+                executableScript.setNextVar("ctx", ctx);
+                executableScript.run();
                 // we need to unwrap the ctx...
-                ctx = (Map<String, Object>) script.unwrap(ctx);
+                ctx = (Map<String, Object>) executableScript.unwrap(ctx);
             }
         } catch (Exception e) {
             throw new IllegalArgumentException("failed to execute script", e);

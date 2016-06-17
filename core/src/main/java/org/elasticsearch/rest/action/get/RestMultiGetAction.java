@@ -42,7 +42,7 @@ public class RestMultiGetAction extends BaseRestHandler {
 
     @Inject
     public RestMultiGetAction(Settings settings, RestController controller, Client client) {
-        super(settings, controller, client);
+        super(settings, client);
         controller.registerHandler(GET, "/_mget", this);
         controller.registerHandler(POST, "/_mget", this);
         controller.registerHandler(GET, "/{index}/_mget", this);
@@ -50,7 +50,7 @@ public class RestMultiGetAction extends BaseRestHandler {
         controller.registerHandler(GET, "/{index}/{type}/_mget", this);
         controller.registerHandler(POST, "/{index}/{type}/_mget", this);
 
-        this.allowExplicitIndex = settings.getAsBoolean("rest.action.multi.allow_explicit_index", true);
+        this.allowExplicitIndex = MULTI_ALLOW_EXPLICIT_INDEX.get(settings);
     }
 
     @Override
@@ -58,7 +58,7 @@ public class RestMultiGetAction extends BaseRestHandler {
         MultiGetRequest multiGetRequest = new MultiGetRequest();
         multiGetRequest.refresh(request.paramAsBoolean("refresh", multiGetRequest.refresh()));
         multiGetRequest.preference(request.param("preference"));
-        multiGetRequest.realtime(request.paramAsBoolean("realtime", null));
+        multiGetRequest.realtime(request.paramAsBoolean("realtime", multiGetRequest.realtime()));
         multiGetRequest.ignoreErrorsOnGeneratedFields(request.paramAsBoolean("ignore_errors_on_generated_fields", false));
 
         String[] sFields = null;

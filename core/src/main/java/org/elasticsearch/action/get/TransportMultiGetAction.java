@@ -22,10 +22,10 @@ package org.elasticsearch.action.get;
 import org.elasticsearch.action.ActionListener;
 import org.elasticsearch.action.support.ActionFilters;
 import org.elasticsearch.action.support.HandledTransportAction;
-import org.elasticsearch.cluster.ClusterService;
 import org.elasticsearch.cluster.ClusterState;
 import org.elasticsearch.cluster.block.ClusterBlockLevel;
 import org.elasticsearch.cluster.metadata.IndexNameExpressionResolver;
+import org.elasticsearch.cluster.service.ClusterService;
 import org.elasticsearch.common.inject.Inject;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.util.concurrent.AtomicArray;
@@ -69,17 +69,17 @@ public class TransportMultiGetAction extends HandledTransportAction<MultiGetRequ
                 continue;
             }
             item.routing(clusterState.metaData().resolveIndexRouting(item.parent(), item.routing(), item.index()));
-            String concreteSingleIndex = indexNameExpressionResolver.concreteSingleIndex(clusterState, item);
+            String concreteSingleIndex = indexNameExpressionResolver.concreteSingleIndex(clusterState, item).getName();
             if (item.routing() == null && clusterState.getMetaData().routingRequired(concreteSingleIndex, item.type())) {
                 responses.set(i, new MultiGetItemResponse(null, new MultiGetResponse.Failure(concreteSingleIndex, item.type(), item.id(),
                         new IllegalArgumentException("routing is required for [" + concreteSingleIndex + "]/[" + item.type() + "]/[" + item.id() + "]"))));
                 continue;
             }
             ShardId shardId = clusterService.operationRouting()
-                    .getShards(clusterState, concreteSingleIndex, item.type(), item.id(), item.routing(), null).shardId();
+                    .getShards(clusterState, concreteSingleIndex, item.id(), item.routing(), null).shardId();
             MultiGetShardRequest shardRequest = shardRequests.get(shardId);
             if (shardRequest == null) {
-                shardRequest = new MultiGetShardRequest(request, shardId.index().name(), shardId.id());
+                shardRequest = new MultiGetShardRequest(request, shardId.getIndexName(), shardId.id());
                 shardRequests.put(shardId, shardRequest);
             }
             shardRequest.add(i, item);

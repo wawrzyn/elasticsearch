@@ -25,7 +25,6 @@ import org.elasticsearch.SpecialPermission;
 import org.elasticsearch.bootstrap.BootstrapInfo;
 import org.elasticsearch.common.Nullable;
 import org.elasticsearch.common.component.AbstractComponent;
-import org.elasticsearch.common.inject.Inject;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.script.ClassPermission;
 import org.elasticsearch.script.CompiledScript;
@@ -65,6 +64,10 @@ import java.util.concurrent.atomic.AtomicLong;
  *
  */
 public class JavaScriptScriptEngineService extends AbstractComponent implements ScriptEngineService {
+
+    public static final String NAME = "javascript";
+
+    public static final String EXTENSION = "js";
 
     private final AtomicLong counter = new AtomicLong();
 
@@ -132,7 +135,6 @@ public class JavaScriptScriptEngineService extends AbstractComponent implements 
     /** ensures this engine is initialized */
     public static void init() {}
 
-    @Inject
     public JavaScriptScriptEngineService(Settings settings) {
         super(settings);
 
@@ -155,25 +157,20 @@ public class JavaScriptScriptEngineService extends AbstractComponent implements 
     }
 
     @Override
-    public String[] types() {
-        return new String[]{"js", "javascript"};
+    public String getType() {
+        return NAME;
     }
 
     @Override
-    public String[] extensions() {
-        return new String[]{"js"};
+    public String getExtension() {
+        return EXTENSION;
     }
 
     @Override
-    public boolean sandboxed() {
-        return false;
-    }
-
-    @Override
-    public Object compile(String script, Map<String, String> params) {
+    public Object compile(String scriptName, String scriptSource, Map<String, String> params) {
         Context ctx = Context.enter();
         try {
-            return ctx.compileString(script, generateScriptName(), 1, DOMAIN);
+            return ctx.compileString(scriptSource, generateScriptName(), 1, DOMAIN);
         } finally {
             Context.exit();
         }
@@ -319,11 +316,6 @@ public class JavaScriptScriptEngineService extends AbstractComponent implements 
         }
 
         @Override
-        public float runAsFloat() {
-            return ((Number) run()).floatValue();
-        }
-
-        @Override
         public long runAsLong() {
             return ((Number) run()).longValue();
         }
@@ -348,12 +340,14 @@ public class JavaScriptScriptEngineService extends AbstractComponent implements 
             setJavaPrimitiveWrap(false); // RingoJS does that..., claims its annoying...
         }
 
-        public Scriptable wrapAsJavaObject(Context cx, Scriptable scope, Object javaObject, Class staticType) {
+        @Override
+        @SuppressWarnings("unchecked")
+        public Scriptable wrapAsJavaObject(Context cx, Scriptable scope, Object javaObject, Class<?> staticType) {
             if (javaObject instanceof Map) {
-                return NativeMap.wrap(scope, (Map) javaObject);
+                return NativeMap.wrap(scope, (Map<Object, Object>) javaObject);
             }
             if (javaObject instanceof List) {
-                return NativeList.wrap(scope, (List) javaObject, staticType);
+                return NativeList.wrap(scope, (List<Object>) javaObject, staticType);
             }
             return super.wrapAsJavaObject(cx, scope, javaObject, staticType);
         }

@@ -104,7 +104,7 @@ final class Seccomp {
         int prctl(int option, NativeLong arg2, NativeLong arg3, NativeLong arg4, NativeLong arg5);
         /**
          * used to call seccomp(2), its too new...
-         * this is the only way, DONT use it on some other architecture unless you know wtf you are doing
+         * this is the only way, DON'T use it on some other architecture unless you know wtf you are doing
          */
         NativeLong syscall(NativeLong number, Object... args);
     };
@@ -394,7 +394,7 @@ final class Seccomp {
             method = 0;
             int errno1 = Native.getLastError();
             if (logger.isDebugEnabled()) {
-                logger.debug("seccomp(SECCOMP_SET_MODE_FILTER): " + JNACLibrary.strerror(errno1) + ", falling back to prctl(PR_SET_SECCOMP)...");
+                logger.debug("seccomp(SECCOMP_SET_MODE_FILTER): {}, falling back to prctl(PR_SET_SECCOMP)...", JNACLibrary.strerror(errno1));
             }
             if (linux_prctl(PR_SET_SECCOMP, SECCOMP_MODE_FILTER, pointer, 0, 0) != 0) {
                 int errno2 = Native.getLastError();

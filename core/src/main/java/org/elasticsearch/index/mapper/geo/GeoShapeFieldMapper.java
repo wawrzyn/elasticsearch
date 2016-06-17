@@ -18,11 +18,12 @@
  */
 package org.elasticsearch.index.mapper.geo;
 
-import com.spatial4j.core.shape.Point;
-import com.spatial4j.core.shape.Shape;
-import com.spatial4j.core.shape.jts.JtsGeometry;
+import org.locationtech.spatial4j.shape.Point;
+import org.locationtech.spatial4j.shape.Shape;
+import org.locationtech.spatial4j.shape.jts.JtsGeometry;
 import org.apache.lucene.document.Field;
 import org.apache.lucene.index.IndexOptions;
+import org.apache.lucene.search.Query;
 import org.apache.lucene.spatial.prefix.PrefixTreeStrategy;
 import org.apache.lucene.spatial.prefix.RecursivePrefixTreeStrategy;
 import org.apache.lucene.spatial.prefix.TermQueryPrefixTreeStrategy;
@@ -46,6 +47,8 @@ import org.elasticsearch.index.mapper.MappedFieldType;
 import org.elasticsearch.index.mapper.Mapper;
 import org.elasticsearch.index.mapper.MapperParsingException;
 import org.elasticsearch.index.mapper.ParseContext;
+import org.elasticsearch.index.query.QueryShardContext;
+import org.elasticsearch.index.query.QueryShardException;
 
 import java.io.IOException;
 import java.util.Iterator;
@@ -53,15 +56,14 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
-import static org.elasticsearch.common.xcontent.support.XContentMapValues.nodeBooleanValue;
-import static org.elasticsearch.index.mapper.MapperBuilders.geoShapeField;
+import static org.elasticsearch.common.xcontent.support.XContentMapValues.lenientNodeBooleanValue;
 
 
 /**
- * FieldMapper for indexing {@link com.spatial4j.core.shape.Shape}s.
+ * FieldMapper for indexing {@link org.locationtech.spatial4j.shape.Shape}s.
  * <p>
  * Currently Shapes can only be indexed and can only be queried using
- * {@link org.elasticsearch.index.query.GeoShapeQueryParser}, consequently
+ * {@link org.elasticsearch.index.query.GeoShapeQueryBuilder}, consequently
  * a lot of behavior in this Mapper is disabled.
  * <p>
  * Format supported:
@@ -96,8 +98,8 @@ public class GeoShapeFieldMapper extends FieldMapper {
         public static final boolean POINTS_ONLY = false;
         public static final int GEOHASH_LEVELS = GeoUtils.geoHashLevelsForPrecision("50m");
         public static final int QUADTREE_LEVELS = GeoUtils.quadTreeLevelsForPrecision("50m");
-        public static final double LEGACY_DISTANCE_ERROR_PCT = 0.025d;
         public static final Orientation ORIENTATION = Orientation.RIGHT;
+        public static final double LEGACY_DISTANCE_ERROR_PCT = 0.025d;
         public static final Explicit<Boolean> COERCE = new Explicit<>(false, false);
 
         public static final MappedFieldType FIELD_TYPE = new GeoShapeFieldType();
@@ -138,7 +140,7 @@ public class GeoShapeFieldMapper extends FieldMapper {
                 return new Explicit<>(coerce, true);
             }
             if (context.indexSettings() != null) {
-                return new Explicit<>(context.indexSettings().getAsBoolean("index.mapping.coerce", Defaults.COERCE.value()), false);
+                return new Explicit<>(COERCE_SETTING.get(context.indexSettings()), false);
             }
             return Defaults.COERCE;
         }
@@ -147,12 +149,7 @@ public class GeoShapeFieldMapper extends FieldMapper {
         public GeoShapeFieldMapper build(BuilderContext context) {
             GeoShapeFieldType geoShapeFieldType = (GeoShapeFieldType)fieldType;
 
-            if (geoShapeFieldType.tree.equals(Names.TREE_QUADTREE) && context.indexCreatedVersion().before(Version.V_2_0_0_beta1)) {
-                geoShapeFieldType.setTree("legacyquadtree");
-            }
-
-            if (context.indexCreatedVersion().before(Version.V_2_0_0_beta1) ||
-                (geoShapeFieldType.treeLevels() == 0 && geoShapeFieldType.precisionInMeters() < 0)) {
+            if (geoShapeFieldType.treeLevels() == 0 && geoShapeFieldType.precisionInMeters() < 0) {
                 geoShapeFieldType.setDefaultDistanceErrorPct(Defaults.LEGACY_DISTANCE_ERROR_PCT);
             }
             setupFieldType(context);
@@ -166,10 +163,10 @@ public class GeoShapeFieldMapper extends FieldMapper {
 
         @Override
         public Mapper.Builder parse(String name, Map<String, Object> node, ParserContext parserContext) throws MapperParsingException {
-            Builder builder = geoShapeField(name);
+            Builder builder = new Builder(name);
             for (Iterator<Map.Entry<String, Object>> iterator = node.entrySet().iterator(); iterator.hasNext();) {
                 Map.Entry<String, Object> entry = iterator.next();
-                String fieldName = Strings.toUnderscoreCase(entry.getKey());
+                String fieldName = entry.getKey();
                 Object fieldNode = entry.getValue();
                 if (Names.TREE.equals(fieldName)) {
                     builder.fieldType().setTree(fieldNode.toString());
@@ -190,11 +187,11 @@ public class GeoShapeFieldMapper extends FieldMapper {
                     builder.fieldType().setStrategyName(fieldNode.toString());
                     iterator.remove();
                 } else if (Names.COERCE.equals(fieldName)) {
-                    builder.coerce(nodeBooleanValue(fieldNode));
+                    builder.coerce(lenientNodeBooleanValue(fieldNode));
                     iterator.remove();
                 } else if (Names.STRATEGY_POINTS_ONLY.equals(fieldName)
                     && builder.fieldType().strategyName.equals(SpatialStrategy.TERM.getStrategyName()) == false) {
-                    builder.fieldType().setPointsOnly(XContentMapValues.nodeBooleanValue(fieldNode));
+                    builder.fieldType().setPointsOnly(XContentMapValues.lenientNodeBooleanValue(fieldNode));
                     iterator.remove();
                 }
             }
@@ -419,10 +416,9 @@ public class GeoShapeFieldMapper extends FieldMapper {
         }
 
         @Override
-        public String value(Object value) {
-            throw new UnsupportedOperationException("GeoShape fields cannot be converted to String values");
+        public Query termQuery(Object value, QueryShardContext context) {
+            throw new QueryShardException(context, "Geo fields do not support exact searching, use dedicated geo queries instead");
         }
-
     }
 
     protected Explicit<Boolean> coerce;
@@ -458,7 +454,8 @@ public class GeoShapeFieldMapper extends FieldMapper {
                 return null;
             }
             for (Field field : fields) {
-                if (!customBoost()) {
+                if (!customBoost() &&
+                    fieldType.boost() != 1f && Version.indexCreated(context.indexSettings()).before(Version.V_5_0_0_alpha1)) {
                     field.setBoost(fieldType().boost());
                 }
                 context.doc().add(field);

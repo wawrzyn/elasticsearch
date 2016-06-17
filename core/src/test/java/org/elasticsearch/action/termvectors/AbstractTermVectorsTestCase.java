@@ -82,7 +82,7 @@ public abstract class AbstractTermVectorsTestCase extends ESIntegTestCase {
 
         public void addToMappings(XContentBuilder mappingsBuilder) throws IOException {
             mappingsBuilder.startObject(name);
-            mappingsBuilder.field("type", "string");
+            mappingsBuilder.field("type", "text");
             String tv_settings;
             if (storedPositions && storedOffset && storedPayloads) {
                 tv_settings = "with_positions_offsets_payloads";
@@ -208,7 +208,7 @@ public abstract class AbstractTermVectorsTestCase extends ESIntegTestCase {
             field.addToMappings(mappingBuilder);
         }
         mappingBuilder.endObject().endObject().endObject();
-        Settings.Builder settings = Settings.settingsBuilder()
+        Settings.Builder settings = Settings.builder()
                 .put(indexSettings())
                 .put("index.analysis.analyzer.tv_test.tokenizer", "standard")
                 .putArray("index.analysis.analyzer.tv_test.filter", "type_as_payload", "lowercase");
@@ -238,7 +238,7 @@ public abstract class AbstractTermVectorsTestCase extends ESIntegTestCase {
                 contentArray[j] = fieldContentOptions[randomInt(fieldContentOptions.length - 1)];
                 docSource.put(fieldSettings[j].name, contentArray[j]);
             }
-            final String id = routingKeyForShard(index, "type", i);
+            final String id = routingKeyForShard(index, i);
             TestDoc doc = new TestDoc(id, fieldSettings, contentArray.clone());
             index(doc.index, doc.type, doc.id, docSource);
             testDocs[i] = doc;
@@ -411,7 +411,7 @@ public abstract class AbstractTermVectorsTestCase extends ESIntegTestCase {
     protected TermVectorsRequestBuilder getRequestForConfig(TestConfig config) {
         return client().prepareTermVectors(randomBoolean() ? config.doc.index : config.doc.alias, config.doc.type, config.doc.id).setPayloads(config.requestPayloads)
                 .setOffsets(config.requestOffsets).setPositions(config.requestPositions).setFieldStatistics(true).setTermStatistics(true)
-                .setSelectedFields(config.selectedFields);
+                .setSelectedFields(config.selectedFields).setRealtime(false);
     }
 
     protected Fields getTermVectorsFromLucene(DirectoryReader directoryReader, TestDoc doc) throws IOException {

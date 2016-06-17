@@ -20,12 +20,10 @@
 package org.elasticsearch.common.unit;
 
 import org.elasticsearch.ElasticsearchParseException;
-import org.elasticsearch.cluster.metadata.MetaDataIndexUpgradeService;
 import org.elasticsearch.common.Strings;
 import org.elasticsearch.common.io.stream.StreamInput;
 import org.elasticsearch.common.io.stream.StreamOutput;
-import org.elasticsearch.common.io.stream.Streamable;
-import org.elasticsearch.common.settings.Settings;
+import org.elasticsearch.common.io.stream.Writeable;
 import org.joda.time.Period;
 import org.joda.time.PeriodType;
 import org.joda.time.format.PeriodFormat;
@@ -36,7 +34,7 @@ import java.util.Locale;
 import java.util.Objects;
 import java.util.concurrent.TimeUnit;
 
-public class TimeValue implements Streamable {
+public class TimeValue implements Writeable {
 
     /** How many nano-seconds in one milli-second */
     public static final long NSEC_PER_MSEC = 1000000;
@@ -61,13 +59,8 @@ public class TimeValue implements Streamable {
         return new TimeValue(hours, TimeUnit.HOURS);
     }
 
-    private long duration;
-
-    private TimeUnit timeUnit;
-
-    private TimeValue() {
-
-    }
+    private final long duration;
+    private final TimeUnit timeUnit;
 
     public TimeValue(long millis) {
         this(millis, TimeUnit.MILLISECONDS);
@@ -76,6 +69,19 @@ public class TimeValue implements Streamable {
     public TimeValue(long duration, TimeUnit timeUnit) {
         this.duration = duration;
         this.timeUnit = timeUnit;
+    }
+
+    /**
+     * Read from a stream.
+     */
+    public TimeValue(StreamInput in) throws IOException {
+        duration = in.readZLong();
+        timeUnit = TimeUnit.NANOSECONDS;
+    }
+
+    @Override
+    public void writeTo(StreamOutput out) throws IOException {
+        out.writeZLong(nanos());
     }
 
     public long nanos() {
@@ -252,9 +258,14 @@ public class TimeValue implements Streamable {
         }
     }
 
+    public static TimeValue parseTimeValue(String sValue, String settingName) {
+        Objects.requireNonNull(settingName);
+        Objects.requireNonNull(sValue);
+        return parseTimeValue(sValue, null, settingName);
+    }
+
     public static TimeValue parseTimeValue(String sValue, TimeValue defaultValue, String settingName) {
         settingName = Objects.requireNonNull(settingName);
-        assert settingName.startsWith("index.") == false || MetaDataIndexUpgradeService.INDEX_TIME_SETTINGS.contains(settingName) : settingName;
         if (sValue == null) {
             return defaultValue;
         }
@@ -262,17 +273,17 @@ public class TimeValue implements Streamable {
             long millis;
             String lowerSValue = sValue.toLowerCase(Locale.ROOT).trim();
             if (lowerSValue.endsWith("ms")) {
-                millis = (long) (Double.parseDouble(lowerSValue.substring(0, lowerSValue.length() - 2)));
+                millis = parse(lowerSValue, 2, 1);
             } else if (lowerSValue.endsWith("s")) {
-                millis = (long) Double.parseDouble(lowerSValue.substring(0, lowerSValue.length() - 1)) * 1000;
+                millis = parse(lowerSValue, 1, 1000);
             } else if (lowerSValue.endsWith("m")) {
-                millis = (long) (Double.parseDouble(lowerSValue.substring(0, lowerSValue.length() - 1)) * 60 * 1000);
+                millis = parse(lowerSValue, 1, 60 * 1000);
             } else if (lowerSValue.endsWith("h")) {
-                millis = (long) (Double.parseDouble(lowerSValue.substring(0, lowerSValue.length() - 1)) * 60 * 60 * 1000);
+                millis = parse(lowerSValue, 1, 60 * 60 * 1000);
             } else if (lowerSValue.endsWith("d")) {
-                millis = (long) (Double.parseDouble(lowerSValue.substring(0, lowerSValue.length() - 1)) * 24 * 60 * 60 * 1000);
+                millis = parse(lowerSValue, 1, 24 * 60 * 60 * 1000);
             } else if (lowerSValue.endsWith("w")) {
-                millis = (long) (Double.parseDouble(lowerSValue.substring(0, lowerSValue.length() - 1)) * 7 * 24 * 60 * 60 * 1000);
+                millis = parse(lowerSValue, 1, 7 * 24 * 60 * 60 * 1000);
             } else if (lowerSValue.equals("-1")) {
                 // Allow this special value to be unit-less:
                 millis = -1;
@@ -280,18 +291,17 @@ public class TimeValue implements Streamable {
                 // Allow this special value to be unit-less:
                 millis = 0;
             } else {
-                if (Settings.getSettingsRequireUnits()) {
-                    // Missing units:
-                    throw new ElasticsearchParseException("Failed to parse setting [{}] with value [{}] as a time value: unit is missing or unrecognized", settingName, sValue);
-                } else {
-                    // Leniency default to msec for bwc:
-                    millis = Long.parseLong(sValue);
-                }
+                // Missing units:
+                throw new ElasticsearchParseException("Failed to parse setting [{}] with value [{}] as a time value: unit is missing or unrecognized", settingName, sValue);
             }
             return new TimeValue(millis, TimeUnit.MILLISECONDS);
         } catch (NumberFormatException e) {
             throw new ElasticsearchParseException("Failed to parse [{}]", e, sValue);
         }
+    }
+
+    private static long parse(String s, int suffixLength, long scale) {
+        return (long) (Double.parseDouble(s.substring(0, s.length() - suffixLength)) * scale);
     }
 
     static final long C0 = 1L;
@@ -301,26 +311,6 @@ public class TimeValue implements Streamable {
     static final long C4 = C3 * 60L;
     static final long C5 = C4 * 60L;
     static final long C6 = C5 * 24L;
-
-    public static TimeValue readTimeValue(StreamInput in) throws IOException {
-        TimeValue timeValue = new TimeValue();
-        timeValue.readFrom(in);
-        return timeValue;
-    }
-
-    /**
-     * serialization converts TimeValue internally to NANOSECONDS
-     */
-    @Override
-    public void readFrom(StreamInput in) throws IOException {
-        duration = in.readLong();
-        timeUnit = TimeUnit.NANOSECONDS;
-    }
-
-    @Override
-    public void writeTo(StreamOutput out) throws IOException {
-        out.writeLong(nanos());
-    }
 
     @Override
     public boolean equals(Object o) {

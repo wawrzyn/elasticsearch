@@ -22,12 +22,11 @@ package org.elasticsearch.action.search;
 import org.elasticsearch.action.support.IndicesOptions;
 import org.elasticsearch.common.ParseFieldMatcher;
 import org.elasticsearch.common.bytes.BytesArray;
-import org.elasticsearch.common.io.stream.NamedWriteableRegistry;
-import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.xcontent.ToXContent;
 import org.elasticsearch.common.xcontent.XContentBuilder;
 import org.elasticsearch.common.xcontent.XContentFactory;
-import org.elasticsearch.index.query.MatchAllQueryParser;
+import org.elasticsearch.index.query.MatchAllQueryBuilder;
+import org.elasticsearch.index.query.QueryParser;
 import org.elasticsearch.indices.query.IndicesQueriesRegistry;
 import org.elasticsearch.rest.action.search.RestMultiSearchAction;
 import org.elasticsearch.script.ScriptService;
@@ -35,17 +34,15 @@ import org.elasticsearch.test.ESTestCase;
 import org.elasticsearch.test.StreamsUtils;
 
 import java.io.IOException;
-import java.util.Collections;
 
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.nullValue;
 
 public class MultiSearchRequestTests extends ESTestCase {
     public void testSimpleAdd() throws Exception {
-        IndicesQueriesRegistry registry = new IndicesQueriesRegistry(Settings.EMPTY, Collections.singleton(new MatchAllQueryParser()), new NamedWriteableRegistry());
         byte[] data = StreamsUtils.copyToBytesFromClasspath("/org/elasticsearch/action/search/simple-msearch1.json");
         MultiSearchRequest request = RestMultiSearchAction.parseRequest(new MultiSearchRequest(), new BytesArray(data), false, null, null,
-                null, null, IndicesOptions.strictExpandOpenAndForbidClosed(), true, registry, ParseFieldMatcher.EMPTY);
+                null, null, IndicesOptions.strictExpandOpenAndForbidClosed(), true, registry(), ParseFieldMatcher.EMPTY, null, null);
         assertThat(request.requests().size(), equalTo(8));
         assertThat(request.requests().get(0).indices()[0], equalTo("test"));
         assertThat(request.requests().get(0).indicesOptions(), equalTo(IndicesOptions.fromOptions(true, true, true, true, IndicesOptions.strictExpandOpenAndForbidClosed())));
@@ -69,10 +66,9 @@ public class MultiSearchRequestTests extends ESTestCase {
     }
 
     public void testSimpleAdd2() throws Exception {
-    IndicesQueriesRegistry registry = new IndicesQueriesRegistry(Settings.EMPTY, Collections.singleton(new MatchAllQueryParser()), new NamedWriteableRegistry());
         byte[] data = StreamsUtils.copyToBytesFromClasspath("/org/elasticsearch/action/search/simple-msearch2.json");
         MultiSearchRequest request = RestMultiSearchAction.parseRequest(new MultiSearchRequest(), new BytesArray(data), false, null, null,
-                null, null, IndicesOptions.strictExpandOpenAndForbidClosed(), true, registry, ParseFieldMatcher.EMPTY);
+                null, null, IndicesOptions.strictExpandOpenAndForbidClosed(), true, registry(), ParseFieldMatcher.EMPTY, null, null);
         assertThat(request.requests().size(), equalTo(5));
         assertThat(request.requests().get(0).indices()[0], equalTo("test"));
         assertThat(request.requests().get(0).types().length, equalTo(0));
@@ -88,10 +84,9 @@ public class MultiSearchRequestTests extends ESTestCase {
     }
 
     public void testSimpleAdd3() throws Exception {
-        IndicesQueriesRegistry registry = new IndicesQueriesRegistry(Settings.EMPTY, Collections.singleton(new MatchAllQueryParser()), new NamedWriteableRegistry());
         byte[] data = StreamsUtils.copyToBytesFromClasspath("/org/elasticsearch/action/search/simple-msearch3.json");
         MultiSearchRequest request = RestMultiSearchAction.parseRequest(new MultiSearchRequest(), new BytesArray(data), false, null, null,
-                null, null, IndicesOptions.strictExpandOpenAndForbidClosed(), true, registry, ParseFieldMatcher.EMPTY);
+                null, null, IndicesOptions.strictExpandOpenAndForbidClosed(), true, registry(), ParseFieldMatcher.EMPTY, null, null);
         assertThat(request.requests().size(), equalTo(4));
         assertThat(request.requests().get(0).indices()[0], equalTo("test0"));
         assertThat(request.requests().get(0).indices()[1], equalTo("test1"));
@@ -108,10 +103,9 @@ public class MultiSearchRequestTests extends ESTestCase {
     }
 
     public void testSimpleAdd4() throws Exception {
-        IndicesQueriesRegistry registry = new IndicesQueriesRegistry(Settings.EMPTY, Collections.singleton(new MatchAllQueryParser()), new NamedWriteableRegistry());
         byte[] data = StreamsUtils.copyToBytesFromClasspath("/org/elasticsearch/action/search/simple-msearch4.json");
         MultiSearchRequest request = RestMultiSearchAction.parseRequest(new MultiSearchRequest(), new BytesArray(data), false, null, null,
-                null, null, IndicesOptions.strictExpandOpenAndForbidClosed(), true, registry, ParseFieldMatcher.EMPTY);
+                null, null, IndicesOptions.strictExpandOpenAndForbidClosed(), true, registry(), ParseFieldMatcher.EMPTY, null, null);
         assertThat(request.requests().size(), equalTo(3));
         assertThat(request.requests().get(0).indices()[0], equalTo("test0"));
         assertThat(request.requests().get(0).indices()[1], equalTo("test1"));
@@ -130,10 +124,9 @@ public class MultiSearchRequestTests extends ESTestCase {
     }
 
     public void testSimpleAdd5() throws Exception {
-        IndicesQueriesRegistry registry = new IndicesQueriesRegistry(Settings.EMPTY, Collections.singleton(new MatchAllQueryParser()), new NamedWriteableRegistry());
         byte[] data = StreamsUtils.copyToBytesFromClasspath("/org/elasticsearch/action/search/simple-msearch5.json");
         MultiSearchRequest request = RestMultiSearchAction.parseRequest(new MultiSearchRequest(), new BytesArray(data), true, null, null,
-                null, null, IndicesOptions.strictExpandOpenAndForbidClosed(), true, registry, ParseFieldMatcher.EMPTY);
+                null, null, IndicesOptions.strictExpandOpenAndForbidClosed(), true, registry(), ParseFieldMatcher.EMPTY, null, null);
         assertThat(request.requests().size(), equalTo(3));
         assertThat(request.requests().get(0).indices()[0], equalTo("test0"));
         assertThat(request.requests().get(0).indices()[1], equalTo("test1"));
@@ -167,7 +160,21 @@ public class MultiSearchRequestTests extends ESTestCase {
         MultiSearchResponse response = new MultiSearchResponse(new MultiSearchResponse.Item[]{new MultiSearchResponse.Item(null, new IllegalStateException("foobar")), new MultiSearchResponse.Item(null, new IllegalStateException("baaaaaazzzz"))});
         XContentBuilder builder = XContentFactory.jsonBuilder();
         response.toXContent(builder, ToXContent.EMPTY_PARAMS);
-        assertEquals("\"responses\"[{\"error\":{\"root_cause\":[{\"type\":\"illegal_state_exception\",\"reason\":\"foobar\"}],\"type\":\"illegal_state_exception\",\"reason\":\"foobar\"}},{\"error\":{\"root_cause\":[{\"type\":\"illegal_state_exception\",\"reason\":\"baaaaaazzzz\"}],\"type\":\"illegal_state_exception\",\"reason\":\"baaaaaazzzz\"}}]",
+        assertEquals("\"responses\"[{\"error\":{\"root_cause\":[{\"type\":\"illegal_state_exception\",\"reason\":\"foobar\"}],\"type\":\"illegal_state_exception\",\"reason\":\"foobar\"},\"status\":500},{\"error\":{\"root_cause\":[{\"type\":\"illegal_state_exception\",\"reason\":\"baaaaaazzzz\"}],\"type\":\"illegal_state_exception\",\"reason\":\"baaaaaazzzz\"},\"status\":500}]",
                 builder.string());
+    }
+
+    public void testMaxConcurrentSearchRequests() {
+        MultiSearchRequest request = new MultiSearchRequest();
+        request.maxConcurrentSearchRequests(randomIntBetween(1, Integer.MAX_VALUE));
+        expectThrows(IllegalArgumentException.class, () ->
+                request.maxConcurrentSearchRequests(randomIntBetween(Integer.MIN_VALUE, 0)));
+    }
+
+    private IndicesQueriesRegistry registry() {
+        IndicesQueriesRegistry registry = new IndicesQueriesRegistry();
+        QueryParser<MatchAllQueryBuilder> parser = MatchAllQueryBuilder::fromXContent;
+        registry.register(parser, MatchAllQueryBuilder.QUERY_NAME_FIELD);
+        return registry;
     }
 }

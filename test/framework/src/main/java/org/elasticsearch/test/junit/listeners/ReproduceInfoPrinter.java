@@ -24,6 +24,7 @@ import org.elasticsearch.common.logging.ESLogger;
 import org.elasticsearch.common.logging.Loggers;
 import org.elasticsearch.test.ESIntegTestCase;
 import org.elasticsearch.test.ESTestCase;
+import org.elasticsearch.test.rest.ESRestTestCase;
 import org.junit.internal.AssumptionViolatedException;
 import org.junit.runner.Description;
 import org.junit.runner.notification.Failure;
@@ -39,11 +40,10 @@ import static org.elasticsearch.test.ESIntegTestCase.TESTS_CLUSTER;
 import static org.elasticsearch.test.rest.ESRestTestCase.REST_TESTS_BLACKLIST;
 import static org.elasticsearch.test.rest.ESRestTestCase.REST_TESTS_SPEC;
 import static org.elasticsearch.test.rest.ESRestTestCase.REST_TESTS_SUITE;
-import static org.elasticsearch.test.rest.ESRestTestCase.Rest;
 
 /**
- * A {@link RunListener} that emits to {@link System#err} a string with command
- * line parameters allowing quick test re-run under MVN command line.
+ * A {@link RunListener} that emits a command you can use to re-run a failing test with the failing random seed to
+ * {@link System#err}.
  */
 public class ReproduceInfoPrinter extends RunListener {
 
@@ -60,7 +60,7 @@ public class ReproduceInfoPrinter extends RunListener {
     }
 
     /**
-     * true if we are running maven integration tests (mvn verify)
+     * Are we in the integ test phase?
      */
     static boolean inVerifyPhase() {
         return Boolean.parseBoolean(System.getProperty("tests.verify.phase"));
@@ -75,14 +75,14 @@ public class ReproduceInfoPrinter extends RunListener {
 
         final StringBuilder b = new StringBuilder("REPRODUCE WITH: gradle ");
         String task = System.getProperty("tests.task");
-        // TODO: enforce (intellij still runs the runner?) or use default "test" but that wont' work for integ
+        // TODO: enforce (intellij still runs the runner?) or use default "test" but that won't work for integ
         b.append(task);
 
         GradleMessageBuilder gradleMessageBuilder = new GradleMessageBuilder(b);
         gradleMessageBuilder.appendAllOpts(failure.getDescription());
 
         //Rest tests are a special case as they allow for additional parameters
-        if (failure.getDescription().getTestClass().isAnnotationPresent(Rest.class)) {
+        if (ESRestTestCase.class.isAssignableFrom(failure.getDescription().getTestClass())) {
             gradleMessageBuilder.appendRestTestsProperties();
         }
 
@@ -137,17 +137,18 @@ public class ReproduceInfoPrinter extends RunListener {
         }
 
         public ReproduceErrorMessageBuilder appendESProperties() {
-            appendProperties("es.logger.level");
+            appendProperties("tests.es.logger.level");
             if (inVerifyPhase()) {
                 // these properties only make sense for integration tests
-                appendProperties("es.node.mode", "es.node.local", TESTS_CLUSTER, ESIntegTestCase.TESTS_ENABLE_MOCK_MODULES);
+                appendProperties("tests.es.node.mode", "tests.es.node.local", TESTS_CLUSTER,
+                    ESIntegTestCase.TESTS_ENABLE_MOCK_MODULES);
             }
             appendProperties("tests.assertion.disabled", "tests.security.manager", "tests.nightly", "tests.jvms",
                              "tests.client.ratio", "tests.heap.size", "tests.bwc", "tests.bwc.version");
             if (System.getProperty("tests.jvm.argline") != null && !System.getProperty("tests.jvm.argline").isEmpty()) {
                 appendOpt("tests.jvm.argline", "\"" + System.getProperty("tests.jvm.argline") + "\"");
             }
-            appendOpt("tests.locale", Locale.getDefault().toString());
+            appendOpt("tests.locale", Locale.getDefault().toLanguageTag());
             appendOpt("tests.timezone", TimeZone.getDefault().getID());
             return this;
         }

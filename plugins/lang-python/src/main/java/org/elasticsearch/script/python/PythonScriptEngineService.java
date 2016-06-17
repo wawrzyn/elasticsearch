@@ -24,7 +24,6 @@ import org.apache.lucene.search.Scorer;
 import org.elasticsearch.SpecialPermission;
 import org.elasticsearch.common.Nullable;
 import org.elasticsearch.common.component.AbstractComponent;
-import org.elasticsearch.common.inject.Inject;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.script.ClassPermission;
 import org.elasticsearch.script.CompiledScript;
@@ -55,9 +54,11 @@ import java.util.Map;
 //TODO we can optimize the case for Map<String, Object> similar to PyStringMap
 public class PythonScriptEngineService extends AbstractComponent implements ScriptEngineService {
 
+    public static final String NAME = "python";
+    public static final String EXTENSION = "py";
+
     private final PythonInterpreter interp;
 
-    @Inject
     public PythonScriptEngineService(Settings settings) {
         super(settings);
 
@@ -91,22 +92,17 @@ public class PythonScriptEngineService extends AbstractComponent implements Scri
     }
 
     @Override
-    public String[] types() {
-        return new String[]{"python", "py"};
+    public String getType() {
+        return NAME;
     }
 
     @Override
-    public String[] extensions() {
-        return new String[]{"py"};
+    public String getExtension() {
+        return EXTENSION;
     }
 
     @Override
-    public boolean sandboxed() {
-        return false;
-    }
-
-    @Override
-    public Object compile(String script, Map<String, String> params) {
+    public Object compile(String scriptName, String scriptSource, Map<String, String> params) {
         // classloader created here
         SecurityManager sm = System.getSecurityManager();
         if (sm != null) {
@@ -115,7 +111,7 @@ public class PythonScriptEngineService extends AbstractComponent implements Scri
         return AccessController.doPrivileged(new PrivilegedAction<PyCode>() {
             @Override
             public PyCode run() {
-                return interp.compile(script);
+                return interp.compile(scriptSource);
             }
         });
     }
@@ -240,11 +236,6 @@ public class PythonScriptEngineService extends AbstractComponent implements Scri
                 return null;
             }
             return ret.__tojava__(Object.class);
-        }
-
-        @Override
-        public float runAsFloat() {
-            return ((Number) run()).floatValue();
         }
 
         @Override

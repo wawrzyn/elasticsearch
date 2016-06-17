@@ -20,12 +20,23 @@
 package org.elasticsearch.common.geo.builders;
 
 import com.vividsolutions.jts.geom.Coordinate;
+
 import org.elasticsearch.test.geo.RandomShapeGenerator;
 import org.elasticsearch.test.geo.RandomShapeGenerator.ShapeType;
 
 import java.io.IOException;
+import java.util.List;
 
 public class LineStringBuilderTests extends AbstractShapeBuilderTestCase<LineStringBuilder> {
+
+    public void testInvalidConstructorArgs() {
+        IllegalArgumentException e = expectThrows(IllegalArgumentException.class, () -> new LineStringBuilder((List<Coordinate>) null));
+        assertEquals("cannot create point collection with empty set of points", e.getMessage());
+        e = expectThrows(IllegalArgumentException.class, () -> new LineStringBuilder(new CoordinatesBuilder()));
+        assertEquals("cannot create point collection with empty set of points", e.getMessage());
+        e = expectThrows(IllegalArgumentException.class, () -> new LineStringBuilder(new CoordinatesBuilder().coordinate(0.0, 0.0)));
+        assertEquals("invalid number of points in LineString (found [1] - must be >= 2)", e.getMessage());
+    }
 
     @Override
     protected LineStringBuilder createTestShapeBuilder() {
@@ -54,11 +65,11 @@ public class LineStringBuilderTests extends AbstractShapeBuilderTestCase<LineStr
                 coordinate.y = randomDoubleBetween(-90.0, 90.0, true);
             }
         }
-        return mutation.points(coordinates);
+        return mutation.coordinates(coordinates);
     }
 
     static LineStringBuilder createRandomShape() {
-        LineStringBuilder lsb = (LineStringBuilder) RandomShapeGenerator.createShape(getRandom(), ShapeType.LINESTRING);
+        LineStringBuilder lsb = (LineStringBuilder) RandomShapeGenerator.createShape(random(), ShapeType.LINESTRING);
         if (randomBoolean()) {
             lsb.close();
         }

@@ -22,14 +22,11 @@ package org.elasticsearch.index.mapper.internal;
 import org.apache.lucene.document.Field;
 import org.apache.lucene.document.StoredField;
 import org.apache.lucene.index.IndexOptions;
-import org.apache.lucene.util.BytesRef;
-import org.elasticsearch.ElasticsearchParseException;
+import org.apache.lucene.search.Query;
 import org.elasticsearch.Version;
 import org.elasticsearch.common.Strings;
-import org.elasticsearch.common.bytes.BytesArray;
 import org.elasticsearch.common.bytes.BytesReference;
 import org.elasticsearch.common.collect.Tuple;
-import org.elasticsearch.common.compress.CompressorFactory;
 import org.elasticsearch.common.io.stream.BytesStreamOutput;
 import org.elasticsearch.common.lucene.Lucene;
 import org.elasticsearch.common.settings.Settings;
@@ -43,6 +40,8 @@ import org.elasticsearch.index.mapper.Mapper;
 import org.elasticsearch.index.mapper.MapperParsingException;
 import org.elasticsearch.index.mapper.MetadataFieldMapper;
 import org.elasticsearch.index.mapper.ParseContext;
+import org.elasticsearch.index.query.QueryShardContext;
+import org.elasticsearch.index.query.QueryShardException;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -51,7 +50,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 
-import static org.elasticsearch.common.xcontent.support.XContentMapValues.nodeBooleanValue;
+import static org.elasticsearch.common.xcontent.support.XContentMapValues.lenientNodeBooleanValue;
 
 /**
  *
@@ -119,13 +118,13 @@ public class SourceFieldMapper extends MetadataFieldMapper {
 
             for (Iterator<Map.Entry<String, Object>> iterator = node.entrySet().iterator(); iterator.hasNext();) {
                 Map.Entry<String, Object> entry = iterator.next();
-                String fieldName = Strings.toUnderscoreCase(entry.getKey());
+                String fieldName = entry.getKey();
                 Object fieldNode = entry.getValue();
                 if (fieldName.equals("enabled")) {
-                    builder.enabled(nodeBooleanValue(fieldNode));
+                    builder.enabled(lenientNodeBooleanValue(fieldNode));
                     iterator.remove();
-                } else if ("format".equals(fieldName) && parserContext.indexVersionCreated().before(Version.V_3_0_0)) {
-                    // ignore on old indices, reject on and after 3.0
+                } else if ("format".equals(fieldName) && parserContext.indexVersionCreated().before(Version.V_5_0_0_alpha1)) {
+                    // ignore on old indices, reject on and after 5.0
                     iterator.remove();
                 } else if (fieldName.equals("includes")) {
                     List<Object> values = (List<Object>) fieldNode;
@@ -173,21 +172,8 @@ public class SourceFieldMapper extends MetadataFieldMapper {
         }
 
         @Override
-        public byte[] value(Object value) {
-            if (value == null) {
-                return null;
-            }
-            BytesReference bValue;
-            if (value instanceof BytesRef) {
-                bValue = new BytesArray((BytesRef) value);
-            } else {
-                bValue = (BytesReference) value;
-            }
-            try {
-                return CompressorFactory.uncompressIfNeeded(bValue).toBytes();
-            } catch (IOException e) {
-                throw new ElasticsearchParseException("failed to decompress source", e);
-            }
+        public Query termQuery(Object value, QueryShardContext context) {
+            throw new QueryShardException(context, "The _source field is not searchable");
         }
     }
 
@@ -251,10 +237,11 @@ public class SourceFieldMapper extends MetadataFieldMapper {
         if (!fieldType().stored()) {
             return;
         }
-        if (context.flyweight()) {
+        BytesReference source = context.sourceToParse().source();
+        // Percolate and tv APIs may not set the source and that is ok, because these APIs will not index any data
+        if (source == null) {
             return;
         }
-        BytesReference source = context.source();
 
         boolean filtered = (includes != null && includes.length > 0) || (excludes != null && excludes.length > 0);
         if (filtered) {

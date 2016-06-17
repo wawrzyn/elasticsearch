@@ -22,30 +22,43 @@ package org.elasticsearch.index.mapper.core;
 import org.apache.lucene.document.Field;
 import org.apache.lucene.document.SortedSetDocValuesField;
 import org.apache.lucene.index.IndexOptions;
+import org.apache.lucene.index.Term;
+import org.apache.lucene.search.MultiTermQuery;
 import org.apache.lucene.search.Query;
+import org.apache.lucene.search.RegexpQuery;
 import org.apache.lucene.util.BytesRef;
 import org.elasticsearch.Version;
-import org.elasticsearch.common.Strings;
+import org.elasticsearch.common.Nullable;
+import org.elasticsearch.common.logging.DeprecationLogger;
+import org.elasticsearch.common.logging.ESLogger;
+import org.elasticsearch.common.logging.Loggers;
 import org.elasticsearch.common.settings.Settings;
 import org.elasticsearch.common.xcontent.XContentBuilder;
 import org.elasticsearch.common.xcontent.XContentParser;
 import org.elasticsearch.common.xcontent.support.XContentMapValues;
 import org.elasticsearch.index.analysis.NamedAnalyzer;
+import org.elasticsearch.index.fielddata.IndexFieldData;
+import org.elasticsearch.index.fielddata.plain.DocValuesIndexFieldData;
+import org.elasticsearch.index.fielddata.plain.PagedBytesIndexFieldData;
+import org.elasticsearch.index.mapper.DocumentMapperParser;
 import org.elasticsearch.index.mapper.FieldMapper;
 import org.elasticsearch.index.mapper.MappedFieldType;
 import org.elasticsearch.index.mapper.Mapper;
 import org.elasticsearch.index.mapper.MapperParsingException;
 import org.elasticsearch.index.mapper.ParseContext;
 import org.elasticsearch.index.mapper.internal.AllFieldMapper;
+import org.elasticsearch.index.query.QueryShardContext;
 
 import java.io.IOException;
+import java.util.Arrays;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
 
 import static org.apache.lucene.index.IndexOptions.NONE;
-import static org.elasticsearch.index.mapper.MapperBuilders.stringField;
-import static org.elasticsearch.index.mapper.core.TypeParsers.parseMultiField;
 import static org.elasticsearch.index.mapper.core.TypeParsers.parseTextField;
 
 public class StringFieldMapper extends FieldMapper implements AllFieldMapper.IncludeInAll {
@@ -53,7 +66,25 @@ public class StringFieldMapper extends FieldMapper implements AllFieldMapper.Inc
     public static final String CONTENT_TYPE = "string";
     private static final int POSITION_INCREMENT_GAP_USE_ANALYZER = -1;
 
+    // If a string field is created on 5.x and all parameters are in this list then we
+    // will automatically upgrade to a text/keyword field. Otherwise we will just fail
+    // saying that string fields are not supported anymore.
+    private static final Set<String> SUPPORTED_PARAMETERS_FOR_AUTO_UPGRADE_TO_KEYWORD = new HashSet<>(Arrays.asList(
+            "type",
+            // common keyword parameters, for which the upgrade is straightforward
+            "index", "store", "doc_values", "omit_norms", "norms", "fields", "copy_to",
+            "fielddata", "ignore_above"));
+    private static final Set<String> SUPPORTED_PARAMETERS_FOR_AUTO_UPGRADE_TO_TEXT = new HashSet<>(Arrays.asList(
+            "type",
+            // common text parameters, for which the upgrade is straightforward
+            "index", "store", "doc_values", "omit_norms", "norms", "fields", "copy_to",
+            "fielddata", "analyzer", "search_analyzer", "search_quote_analyzer"));
+
     public static class Defaults {
+        public static double FIELDDATA_MIN_FREQUENCY = 0;
+        public static double FIELDDATA_MAX_FREQUENCY = Integer.MAX_VALUE;
+        public static int FIELDDATA_MIN_SEGMENT_SIZE = 0;
+
         public static final MappedFieldType FIELD_TYPE = new StringFieldType();
 
         static {
@@ -63,25 +94,7 @@ public class StringFieldMapper extends FieldMapper implements AllFieldMapper.Inc
         // NOTE, when adding defaults here, make sure you add them in the builder
         public static final String NULL_VALUE = null;
 
-        /**
-         * Post 2.0 default for position_increment_gap. Set to 100 so that
-         * phrase queries of reasonably high slop will not match across field
-         * values.
-         */
-        public static final int POSITION_INCREMENT_GAP = 100;
-        public static final int POSITION_INCREMENT_GAP_PRE_2_0 = 0;
-
         public static final int IGNORE_ABOVE = -1;
-
-        /**
-         * The default position_increment_gap for a particular version of Elasticsearch.
-         */
-        public static int positionIncrementGap(Version version) {
-            if (version.before(Version.V_2_0_0_beta1)) {
-                return POSITION_INCREMENT_GAP_PRE_2_0;
-            }
-            return POSITION_INCREMENT_GAP;
-        }
     }
 
     public static class Builder extends FieldMapper.Builder<Builder, StringFieldMapper> {
@@ -103,6 +116,11 @@ public class StringFieldMapper extends FieldMapper implements AllFieldMapper.Inc
         }
 
         @Override
+        public StringFieldType fieldType() {
+            return (StringFieldType) super.fieldType();
+        }
+
+        @Override
         public Builder searchAnalyzer(NamedAnalyzer searchAnalyzer) {
             super.searchAnalyzer(searchAnalyzer);
             return this;
@@ -113,14 +131,34 @@ public class StringFieldMapper extends FieldMapper implements AllFieldMapper.Inc
             return this;
         }
 
-        public Builder searchQuotedAnalyzer(NamedAnalyzer analyzer) {
-            this.fieldType.setSearchQuoteAnalyzer(analyzer);
-            return builder;
-        }
-
         public Builder ignoreAbove(int ignoreAbove) {
             this.ignoreAbove = ignoreAbove;
             return this;
+        }
+
+        public Builder fielddata(boolean fielddata) {
+            fieldType().setFielddata(fielddata);
+            return builder;
+        }
+
+        public Builder eagerGlobalOrdinals(boolean eagerGlobalOrdinals) {
+            fieldType().setEagerGlobalOrdinals(eagerGlobalOrdinals);
+            return builder;
+        }
+
+        public Builder fielddataFrequencyFilter(double minFreq, double maxFreq, int minSegmentSize) {
+            fieldType().setFielddataMinFrequency(minFreq);
+            fieldType().setFielddataMaxFrequency(maxFreq);
+            fieldType().setFielddataMinSegmentSize(minSegmentSize);
+            return builder;
+        }
+
+        @Override
+        protected void setupFieldType(BuilderContext context) {
+            super.setupFieldType(context);
+            if (fieldType().hasDocValues() && ((StringFieldType) fieldType()).fielddata()) {
+                ((StringFieldType) fieldType()).setFielddata(false);
+            }
         }
 
         @Override
@@ -147,20 +185,128 @@ public class StringFieldMapper extends FieldMapper implements AllFieldMapper.Inc
             }
             setupFieldType(context);
             StringFieldMapper fieldMapper = new StringFieldMapper(
-                    name, fieldType, defaultFieldType, positionIncrementGap, ignoreAbove,
+                    name, fieldType(), defaultFieldType, positionIncrementGap, ignoreAbove,
                     context.indexSettings(), multiFieldsBuilder.build(this, context), copyTo);
             return fieldMapper.includeInAll(includeInAll);
         }
     }
 
     public static class TypeParser implements Mapper.TypeParser {
+        private final DeprecationLogger deprecationLogger;
+
+        public TypeParser() {
+            ESLogger logger = Loggers.getLogger(getClass());
+            this.deprecationLogger = new DeprecationLogger(logger);
+        }
+
         @Override
-        public Mapper.Builder parse(String name, Map<String, Object> node, ParserContext parserContext) throws MapperParsingException {
-            StringFieldMapper.Builder builder = stringField(name);
-            parseTextField(builder, name, node, parserContext);
+        public Mapper.Builder parse(String fieldName, Map<String, Object> node, ParserContext parserContext) throws MapperParsingException {
+            if (parserContext.indexVersionCreated().onOrAfter(Version.V_5_0_0_alpha1)) {
+                final Object index = node.get("index");
+                if (Arrays.asList(null, "no", "not_analyzed", "analyzed").contains(index) == false) {
+                    throw new IllegalArgumentException("Can't parse [index] value [" + index + "] for field [" + fieldName + "], expected [no], [not_analyzed] or [analyzed]");
+                }
+                final boolean keyword = index != null && "analyzed".equals(index) == false;
+
+                // Automatically upgrade simple mappings for ease of upgrade, otherwise fail
+                Set<String> autoUpgradeParameters = keyword
+                        ? SUPPORTED_PARAMETERS_FOR_AUTO_UPGRADE_TO_KEYWORD
+                        : SUPPORTED_PARAMETERS_FOR_AUTO_UPGRADE_TO_TEXT;
+                if (autoUpgradeParameters.containsAll(node.keySet())) {
+                    deprecationLogger.deprecated("The [string] field is deprecated, please use [text] or [keyword] instead on [{}]",
+                            fieldName);
+                    {
+                        // upgrade the index setting
+                        node.put("index", "no".equals(index) == false);
+                    }
+                    {
+                        // upgrade norms settings
+                        Object norms = node.remove("norms");
+                        if (norms instanceof Map) {
+                            norms = ((Map<?,?>) norms).get("enabled");
+                        }
+                        if (norms != null) {
+                            node.put("norms", TypeParsers.nodeBooleanValue("norms", norms, parserContext));
+                        }
+                        Object omitNorms = node.remove("omit_norms");
+                        if (omitNorms != null) {
+                            node.put("norms", TypeParsers.nodeBooleanValue("omit_norms", omitNorms, parserContext) == false);
+                        }
+                    }
+                    {
+                        // upgrade fielddata settings
+                        Object fielddataO = node.get("fielddata");
+                        if (fielddataO instanceof Map) {
+                            Map<?,?> fielddata = (Map<?, ?>) fielddataO;
+                            if (keyword == false) {
+                                node.put("fielddata", "disabled".equals(fielddata.get("format")) == false);
+                                Map<?,?> fielddataFilter = (Map<?, ?>) fielddata.get("filter");
+                                if (fielddataFilter != null) {
+                                    Map<?,?> frequencyFilter = (Map<?, ?>) fielddataFilter.get("frequency");
+                                    frequencyFilter.keySet().retainAll(Arrays.asList("min", "max", "min_segment_size"));
+                                    node.put("fielddata_frequency_filter", frequencyFilter);
+                                }
+                            } else {
+                                node.remove("fielddata");
+                            }
+                            final Object loading = fielddata.get("loading");
+                            if (loading != null) {
+                                node.put("eager_global_ordinals", "eager_global_ordinals".equals(loading));
+                            }
+                        }
+                    }
+                    if (keyword) {
+                        return new KeywordFieldMapper.TypeParser().parse(fieldName, node, parserContext);
+                    } else {
+                        return new TextFieldMapper.TypeParser().parse(fieldName, node, parserContext);
+                    }
+
+                }
+                throw new IllegalArgumentException("The [string] type is removed in 5.0. You should now use either a [text] "
+                        + "or [keyword] field instead for field [" + fieldName + "]");
+            }
+
+            StringFieldMapper.Builder builder = new StringFieldMapper.Builder(fieldName);
+            // hack for the fact that string can't just accept true/false for
+            // the index property and still accepts no/not_analyzed/analyzed
+            final Object index = node.remove("index");
+            if (index != null) {
+                final String normalizedIndex = index.toString();
+                switch (normalizedIndex) {
+                case "analyzed":
+                    builder.tokenized(true);
+                    node.put("index", true);
+                    break;
+                case "not_analyzed":
+                    builder.tokenized(false);
+                    node.put("index", true);
+                    break;
+                case "no":
+                    node.put("index", false);
+                    break;
+                default:
+                    throw new IllegalArgumentException("Can't parse [index] value [" + index + "] for field [" + fieldName + "], expected [no], [not_analyzed] or [analyzed]");
+                }
+            }
+            final Object fielddataObject = node.get("fielddata");
+            if (fielddataObject instanceof Map) {
+                Map<?,?> fielddata = (Map<?, ?>) fielddataObject;
+                final Object loading = fielddata.get("loading");
+                if (loading != null) {
+                    node.put("eager_global_ordinals", "eager_global_ordinals".equals(loading));
+                }
+                Map<?,?> fielddataFilter = (Map<?, ?>) fielddata.get("filter");
+                if (fielddataFilter != null) {
+                    Map<?,?> frequencyFilter = (Map<?, ?>) fielddataFilter.get("frequency");
+                    frequencyFilter.keySet().retainAll(Arrays.asList("min", "max", "min_segment_size"));
+                    node.put("fielddata_frequency_filter", frequencyFilter);
+                }
+                node.put("fielddata", "disabled".equals(fielddata.get("format")) == false);
+            }
+            parseTextField(builder, fieldName, node, parserContext);
             for (Iterator<Map.Entry<String, Object>> iterator = node.entrySet().iterator(); iterator.hasNext();) {
                 Map.Entry<String, Object> entry = iterator.next();
-                String propName = Strings.toUnderscoreCase(entry.getKey());
+                String propName = entry.getKey();
                 Object propNode = entry.getValue();
                 if (propName.equals("null_value")) {
                     if (propNode == null) {
@@ -168,15 +314,7 @@ public class StringFieldMapper extends FieldMapper implements AllFieldMapper.Inc
                     }
                     builder.nullValue(propNode.toString());
                     iterator.remove();
-                } else if (propName.equals("search_quote_analyzer")) {
-                    NamedAnalyzer analyzer = parserContext.analysisService().analyzer(propNode.toString());
-                    if (analyzer == null) {
-                        throw new MapperParsingException("Analyzer [" + propNode.toString() + "] not found for field [" + name + "]");
-                    }
-                    builder.searchQuotedAnalyzer(analyzer);
-                    iterator.remove();
-                } else if (propName.equals("position_increment_gap") ||
-                        parserContext.indexVersionCreated().before(Version.V_2_0_0) && propName.equals("position_offset_gap")) {
+                } else if (propName.equals("position_increment_gap")) {
                     int newPositionIncrementGap = XContentMapValues.nodeIntegerValue(propNode, -1);
                     if (newPositionIncrementGap < 0) {
                         throw new MapperParsingException("positions_increment_gap less than 0 aren't allowed.");
@@ -197,7 +335,19 @@ public class StringFieldMapper extends FieldMapper implements AllFieldMapper.Inc
                 } else if (propName.equals("ignore_above")) {
                     builder.ignoreAbove(XContentMapValues.nodeIntegerValue(propNode, -1));
                     iterator.remove();
-                } else if (parseMultiField(builder, name, parserContext, propName, propNode)) {
+                } else if (propName.equals("fielddata")) {
+                    builder.fielddata(XContentMapValues.nodeBooleanValue(propNode));
+                    iterator.remove();
+                } else if (propName.equals("eager_global_ordinals")) {
+                    builder.eagerGlobalOrdinals(XContentMapValues.nodeBooleanValue(propNode));
+                    iterator.remove();
+                } else if (propName.equals("fielddata_frequency_filter")) {
+                    Map<?,?> frequencyFilter = (Map<?, ?>) propNode;
+                    double minFrequency = XContentMapValues.nodeDoubleValue(frequencyFilter.remove("min"), 0);
+                    double maxFrequency = XContentMapValues.nodeDoubleValue(frequencyFilter.remove("max"), Integer.MAX_VALUE);
+                    int minSegmentSize = XContentMapValues.nodeIntegerValue(frequencyFilter.remove("min_segment_size"), 0);
+                    builder.fielddataFrequencyFilter(minFrequency, maxFrequency, minSegmentSize);
+                    DocumentMapperParser.checkNoRemainingFields(propName, frequencyFilter, parserContext.indexVersionCreated());
                     iterator.remove();
                 }
             }
@@ -205,12 +355,44 @@ public class StringFieldMapper extends FieldMapper implements AllFieldMapper.Inc
         }
     }
 
-    public static final class StringFieldType extends MappedFieldType {
+    public static final class StringFieldType extends org.elasticsearch.index.mapper.StringFieldType {
 
-        public StringFieldType() {}
+        private boolean fielddata;
+        private double fielddataMinFrequency;
+        private double fielddataMaxFrequency;
+        private int fielddataMinSegmentSize;
+
+        public StringFieldType() {
+            fielddata = true;
+            fielddataMinFrequency = Defaults.FIELDDATA_MIN_FREQUENCY;
+            fielddataMaxFrequency = Defaults.FIELDDATA_MAX_FREQUENCY;
+            fielddataMinSegmentSize = Defaults.FIELDDATA_MIN_SEGMENT_SIZE;
+        }
 
         protected StringFieldType(StringFieldType ref) {
             super(ref);
+            this.fielddata = ref.fielddata;
+            this.fielddataMinFrequency = ref.fielddataMinFrequency;
+            this.fielddataMaxFrequency = ref.fielddataMaxFrequency;
+            this.fielddataMinSegmentSize = ref.fielddataMinSegmentSize;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (super.equals(o) == false) {
+                return false;
+            }
+            StringFieldType that = (StringFieldType) o;
+            return fielddata == that.fielddata
+                    && fielddataMinFrequency == that.fielddataMinFrequency
+                    && fielddataMaxFrequency == that.fielddataMaxFrequency
+                    && fielddataMinSegmentSize == that.fielddataMinSegmentSize;
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(super.hashCode(), fielddata,
+                    fielddataMinFrequency, fielddataMaxFrequency, fielddataMinSegmentSize);
         }
 
         public StringFieldType clone() {
@@ -223,11 +405,64 @@ public class StringFieldMapper extends FieldMapper implements AllFieldMapper.Inc
         }
 
         @Override
-        public String value(Object value) {
-            if (value == null) {
-                return null;
+        public void checkCompatibility(MappedFieldType other,
+                List<String> conflicts, boolean strict) {
+            super.checkCompatibility(other, conflicts, strict);
+            StringFieldType otherType = (StringFieldType) other;
+            if (strict) {
+                if (fielddata() != otherType.fielddata()) {
+                    conflicts.add("mapper [" + name() + "] is used by multiple types. Set update_all_types to true to update [fielddata] "
+                            + "across all types.");
+                }
+                if (fielddataMinFrequency() != otherType.fielddataMinFrequency()) {
+                    conflicts.add("mapper [" + name() + "] is used by multiple types. Set update_all_types to true to update "
+                            + "[fielddata_frequency_filter.min] across all types.");
+                }
+                if (fielddataMaxFrequency() != otherType.fielddataMaxFrequency()) {
+                    conflicts.add("mapper [" + name() + "] is used by multiple types. Set update_all_types to true to update "
+                            + "[fielddata_frequency_filter.max] across all types.");
+                }
+                if (fielddataMinSegmentSize() != otherType.fielddataMinSegmentSize()) {
+                    conflicts.add("mapper [" + name() + "] is used by multiple types. Set update_all_types to true to update "
+                            + "[fielddata_frequency_filter.min_segment_size] across all types.");
+                }
             }
-            return value.toString();
+        }
+
+        public boolean fielddata() {
+            return fielddata;
+        }
+
+        public void setFielddata(boolean fielddata) {
+            checkIfFrozen();
+            this.fielddata = fielddata;
+        }
+
+        public double fielddataMinFrequency() {
+            return fielddataMinFrequency;
+        }
+
+        public void setFielddataMinFrequency(double fielddataMinFrequency) {
+            checkIfFrozen();
+            this.fielddataMinFrequency = fielddataMinFrequency;
+        }
+
+        public double fielddataMaxFrequency() {
+            return fielddataMaxFrequency;
+        }
+
+        public void setFielddataMaxFrequency(double fielddataMaxFrequency) {
+            checkIfFrozen();
+            this.fielddataMaxFrequency = fielddataMaxFrequency;
+        }
+
+        public int fielddataMinSegmentSize() {
+            return fielddataMinSegmentSize;
+        }
+
+        public void setFielddataMinSegmentSize(int fielddataMinSegmentSize) {
+            checkIfFrozen();
+            this.fielddataMinSegmentSize = fielddataMinSegmentSize;
         }
 
         @Override
@@ -237,18 +472,41 @@ public class StringFieldMapper extends FieldMapper implements AllFieldMapper.Inc
             }
             return termQuery(nullValue(), null);
         }
+
+        @Override
+        public IndexFieldData.Builder fielddataBuilder() {
+            if (hasDocValues()) {
+                return new DocValuesIndexFieldData.Builder();
+            } else if (fielddata) {
+                return new PagedBytesIndexFieldData.Builder(fielddataMinFrequency, fielddataMaxFrequency, fielddataMinSegmentSize);
+            } else {
+                throw new IllegalArgumentException("Fielddata is disabled on analyzed string fields by default. Set fielddata=true on ["
+                        + name() + "] in order to load fielddata in memory by uninverting the inverted index. Note that this can however "
+                        + "use significant memory.");
+            }
+        }
     }
 
     private Boolean includeInAll;
     private int positionIncrementGap;
     private int ignoreAbove;
 
-    protected StringFieldMapper(String simpleName, MappedFieldType fieldType, MappedFieldType defaultFieldType,
+    protected StringFieldMapper(String simpleName, StringFieldType fieldType, MappedFieldType defaultFieldType,
                                 int positionIncrementGap, int ignoreAbove,
                                 Settings indexSettings, MultiFields multiFields, CopyTo copyTo) {
         super(simpleName, fieldType, defaultFieldType, indexSettings, multiFields, copyTo);
+        if (Version.indexCreated(indexSettings).onOrAfter(Version.V_5_0_0_alpha1)) {
+            throw new IllegalArgumentException("The [string] type is removed in 5.0. You should now use either a [text] "
+                    + "or [keyword] field instead for field [" + fieldType.name() + "]");
+        }
         if (fieldType.tokenized() && fieldType.indexOptions() != NONE && fieldType().hasDocValues()) {
             throw new MapperParsingException("Field [" + fieldType.name() + "] cannot be analyzed and have doc values");
+        }
+        if (fieldType.hasDocValues() && (
+                fieldType.fielddataMinFrequency() != Defaults.FIELDDATA_MIN_FREQUENCY
+                || fieldType.fielddataMaxFrequency() != Defaults.FIELDDATA_MAX_FREQUENCY
+                || fieldType.fielddataMinSegmentSize() != Defaults.FIELDDATA_MIN_SEGMENT_SIZE)) {
+            throw new MapperParsingException("Field [" + fieldType.name() + "] cannot have doc values and use fielddata filtering");
         }
         this.positionIncrementGap = positionIncrementGap;
         this.ignoreAbove = ignoreAbove;
@@ -320,14 +578,13 @@ public class StringFieldMapper extends FieldMapper implements AllFieldMapper.Inc
 
         if (fieldType().indexOptions() != IndexOptions.NONE || fieldType().stored()) {
             Field field = new Field(fieldType().name(), valueAndBoost.value(), fieldType());
-            field.setBoost(valueAndBoost.boost());
+            if (valueAndBoost.boost() != 1f && Version.indexCreated(context.indexSettings()).before(Version.V_5_0_0_alpha1)) {
+                field.setBoost(valueAndBoost.boost());
+            }
             fields.add(field);
         }
         if (fieldType().hasDocValues()) {
             fields.add(new SortedSetDocValuesField(fieldType().name(), new BytesRef(valueAndBoost.value())));
-        }
-        if (fields.isEmpty()) {
-            context.ignoredValue(fieldType().name(), valueAndBoost.value());
         }
     }
 
@@ -341,13 +598,14 @@ public class StringFieldMapper extends FieldMapper implements AllFieldMapper.Inc
      */
     public static ValueAndBoost parseCreateFieldForString(ParseContext context, String nullValue, float defaultBoost) throws IOException {
         if (context.externalValueSet()) {
-            return new ValueAndBoost((String) context.externalValue(), defaultBoost);
+            return new ValueAndBoost(context.externalValue().toString(), defaultBoost);
         }
         XContentParser parser = context.parser();
         if (parser.currentToken() == XContentParser.Token.VALUE_NULL) {
             return new ValueAndBoost(nullValue, defaultBoost);
         }
-        if (parser.currentToken() == XContentParser.Token.START_OBJECT) {
+        if (parser.currentToken() == XContentParser.Token.START_OBJECT
+                && Version.indexCreated(context.indexSettings()).before(Version.V_5_0_0_alpha1)) {
             XContentParser.Token token;
             String currentFieldName = null;
             String value = nullValue;
@@ -383,8 +641,25 @@ public class StringFieldMapper extends FieldMapper implements AllFieldMapper.Inc
     }
 
     @Override
+    protected String indexTokenizeOption(boolean indexed, boolean tokenized) {
+        if (!indexed) {
+            return "no";
+        } else if (tokenized) {
+            return "analyzed";
+        } else {
+            return "not_analyzed";
+        }
+    }
+
+    @Override
+    public StringFieldType fieldType() {
+        return (StringFieldType) super.fieldType();
+    }
+
+    @Override
     protected void doXContentBody(XContentBuilder builder, boolean includeDefaults, Params params) throws IOException {
         super.doXContentBody(builder, includeDefaults, params);
+        doXContentAnalyzers(builder, includeDefaults);
 
         if (includeDefaults || fieldType().nullValue() != null) {
             builder.field("null_value", fieldType().nullValue());
@@ -398,18 +673,30 @@ public class StringFieldMapper extends FieldMapper implements AllFieldMapper.Inc
         if (includeDefaults || positionIncrementGap != POSITION_INCREMENT_GAP_USE_ANALYZER) {
             builder.field("position_increment_gap", positionIncrementGap);
         }
-        NamedAnalyzer searchQuoteAnalyzer = fieldType().searchQuoteAnalyzer();
-        if (searchQuoteAnalyzer != null && !searchQuoteAnalyzer.name().equals(fieldType().searchAnalyzer().name())) {
-            builder.field("search_quote_analyzer", searchQuoteAnalyzer.name());
-        } else if (includeDefaults) {
-            if (searchQuoteAnalyzer == null) {
-                builder.field("search_quote_analyzer", "default");
-            } else {
-                builder.field("search_quote_analyzer", searchQuoteAnalyzer.name());
-            }
-        }
+
         if (includeDefaults || ignoreAbove != Defaults.IGNORE_ABOVE) {
             builder.field("ignore_above", ignoreAbove);
+        }
+        if (includeDefaults || fieldType().fielddata() != ((StringFieldType) defaultFieldType).fielddata()) {
+            builder.field("fielddata", fieldType().fielddata());
+        }
+        if (fieldType().fielddata()) {
+            if (includeDefaults
+                    || fieldType().fielddataMinFrequency() != Defaults.FIELDDATA_MIN_FREQUENCY
+                    || fieldType().fielddataMaxFrequency() != Defaults.FIELDDATA_MAX_FREQUENCY
+                    || fieldType().fielddataMinSegmentSize() != Defaults.FIELDDATA_MIN_SEGMENT_SIZE) {
+                builder.startObject("fielddata_frequency_filter");
+                if (includeDefaults || fieldType().fielddataMinFrequency() != Defaults.FIELDDATA_MIN_FREQUENCY) {
+                    builder.field("min", fieldType().fielddataMinFrequency());
+                }
+                if (includeDefaults || fieldType().fielddataMaxFrequency() != Defaults.FIELDDATA_MAX_FREQUENCY) {
+                    builder.field("max", fieldType().fielddataMaxFrequency());
+                }
+                if (includeDefaults || fieldType().fielddataMinSegmentSize() != Defaults.FIELDDATA_MIN_SEGMENT_SIZE) {
+                    builder.field("min_segment_size", fieldType().fielddataMinSegmentSize());
+                }
+                builder.endObject();
+            }
         }
     }
 

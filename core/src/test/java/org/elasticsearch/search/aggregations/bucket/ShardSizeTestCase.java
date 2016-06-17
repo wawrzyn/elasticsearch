@@ -69,8 +69,8 @@ public abstract class ShardSizeTestCase extends ESIntegTestCase {
 
         List<IndexRequestBuilder> docs = new ArrayList<>();
 
-        routing1 = routingKeyForShard("idx", "type", 0);
-        routing2 = routingKeyForShard("idx", "type", 1);
+        routing1 = routingKeyForShard("idx", 0);
+        routing2 = routingKeyForShard("idx", 1);
 
         docs.addAll(indexDoc(routing1, "1", 5));
         docs.addAll(indexDoc(routing1, "2", 4));
@@ -93,11 +93,11 @@ public abstract class ShardSizeTestCase extends ESIntegTestCase {
         SearchResponse resp = client().prepareSearch("idx").setTypes("type").setRouting(routing1).setQuery(matchAllQuery()).execute().actionGet();
         assertSearchResponse(resp);
         long totalOnOne = resp.getHits().getTotalHits();
-        assertThat(totalOnOne, is(15l));
+        assertThat(totalOnOne, is(15L));
         resp = client().prepareSearch("idx").setTypes("type").setRouting(routing2).setQuery(matchAllQuery()).execute().actionGet();
         assertSearchResponse(resp);
         long totalOnTwo = resp.getHits().getTotalHits();
-        assertThat(totalOnTwo, is(12l));
+        assertThat(totalOnTwo, is(12L));
     }
 
     protected List<IndexRequestBuilder> indexDoc(String shard, String key, int times) throws Exception {

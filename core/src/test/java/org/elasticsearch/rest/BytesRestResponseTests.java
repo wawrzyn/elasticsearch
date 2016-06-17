@@ -24,6 +24,8 @@ import org.elasticsearch.ExceptionsHelper;
 import org.elasticsearch.action.search.SearchPhaseExecutionException;
 import org.elasticsearch.action.search.ShardSearchFailure;
 import org.elasticsearch.common.ParsingException;
+import org.elasticsearch.index.Index;
+import org.elasticsearch.rest.support.RestUtils;
 import org.elasticsearch.search.SearchShardTarget;
 import org.elasticsearch.test.ESTestCase;
 import org.elasticsearch.test.rest.FakeRestRequest;
@@ -34,8 +36,11 @@ import java.io.IOException;
 
 import static org.hamcrest.Matchers.contains;
 import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.not;
 import static org.hamcrest.Matchers.notNullValue;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 /**
  *
@@ -134,9 +139,9 @@ public class BytesRestResponseTests extends ESTestCase {
         RestRequest request = new FakeRestRequest();
         RestChannel channel = new DetailedExceptionRestChannel(request);
         ShardSearchFailure failure = new ShardSearchFailure(new ParsingException(1, 2, "foobar", null),
-                new SearchShardTarget("node_1", "foo", 1));
+                new SearchShardTarget("node_1", new Index("foo", "_na_"), 1));
         ShardSearchFailure failure1 = new ShardSearchFailure(new ParsingException(1, 2, "foobar", null),
-                new SearchShardTarget("node_1", "foo", 2));
+                new SearchShardTarget("node_1", new Index("foo", "_na_"), 2));
         SearchPhaseExecutionException ex = new SearchPhaseExecutionException("search", "all shards failed",  new ShardSearchFailure[] {failure, failure1});
         BytesRestResponse response = new BytesRestResponse(channel, new RemoteTransportException("foo", ex));
         String text = response.content().toUtf8();
@@ -144,6 +149,32 @@ public class BytesRestResponseTests extends ESTestCase {
         assertEquals(expected.trim(), text.trim());
         String stackTrace = ExceptionsHelper.stackTrace(ex);
         assertTrue(stackTrace.contains("Caused by: ParsingException[foobar]"));
+    }
+
+    public void testResponseWhenPathContainsEncodingError() throws IOException {
+        final String path = "%a";
+        final RestRequest request = mock(RestRequest.class);
+        when(request.rawPath()).thenReturn(path);
+        final IllegalArgumentException e = expectThrows(IllegalArgumentException.class, () -> RestUtils.decodeComponent(request.rawPath()));
+        final RestChannel channel = new DetailedExceptionRestChannel(request);
+        // if we try to decode the path, this will throw an IllegalArgumentException again
+        final BytesRestResponse response = new BytesRestResponse(channel, e);
+        assertNotNull(response.content());
+        final String content = response.content().toUtf8();
+        assertThat(content, containsString("\"type\":\"illegal_argument_exception\""));
+        assertThat(content, containsString("\"reason\":\"partial escape sequence at end of string: %a\""));
+        assertThat(content, containsString("\"status\":" + 400));
+    }
+
+    public void testResponseWhenInternalServerError() throws IOException {
+        final RestRequest request = new FakeRestRequest();
+        final RestChannel channel = new DetailedExceptionRestChannel(request);
+        final BytesRestResponse response = new BytesRestResponse(channel, new ElasticsearchException("simulated"));
+        assertNotNull(response.content());
+        final String content = response.content().toUtf8();
+        assertThat(content, containsString("\"type\":\"exception\""));
+        assertThat(content, containsString("\"reason\":\"simulated\""));
+        assertThat(content, containsString("\"status\":" + 500));
     }
 
     public static class WithHeadersException extends ElasticsearchException {
@@ -155,7 +186,7 @@ public class BytesRestResponseTests extends ESTestCase {
         }
     }
 
-    private static class SimpleExceptionRestChannel extends RestChannel {
+    private static class SimpleExceptionRestChannel extends AbstractRestChannel {
 
         SimpleExceptionRestChannel(RestRequest request) {
             super(request, false);
@@ -166,7 +197,7 @@ public class BytesRestResponseTests extends ESTestCase {
         }
     }
 
-    private static class DetailedExceptionRestChannel extends RestChannel {
+    private static class DetailedExceptionRestChannel extends AbstractRestChannel {
 
         DetailedExceptionRestChannel(RestRequest request) {
             super(request, true);

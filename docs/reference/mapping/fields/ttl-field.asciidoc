@@ -1,6 +1,8 @@
 [[mapping-ttl-field]]
 === `_ttl` field
 
+deprecated[2.0.0,The current `_ttl` implementation is deprecated and will be replaced with a different implementation in a future version]
+
 Some types of documents, such as session data or special offers, come with an
 expiration date. The `_ttl` field allows you to specify the minimum time a
 document should live, after which time the document is deleted automatically.
@@ -42,7 +44,7 @@ PUT my_index/my_type/2 <2>
   "text": "Will not expire"
 }
 -------------------------------
-// AUTOSENSE
+// CONSOLE
 <1> This document will expire 10 minutes after being indexed.
 <2> This document has no TTL set and will not expire.
 
@@ -78,7 +80,7 @@ PUT my_index/my_type/2 <2>
   "text": "Will expire in 5 minutes"
 }
 -------------------------------
-// AUTOSENSE
+// CONSOLE
 <1> This document will expire 10 minutes after being indexed.
 <2> This document has no TTL set and so will expire after the default 5 minutes.
 
@@ -91,7 +93,7 @@ used for future documents.
 
 ==== Note on documents expiration
 
-Expired documents will be automatically deleted periodoically. The following
+Expired documents will be automatically deleted periodically. The following
 settings control the expiry process:
 
 `indices.ttl.interval`::
